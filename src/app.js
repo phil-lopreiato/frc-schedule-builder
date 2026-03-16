@@ -161,11 +161,24 @@ async function parsePdfAgenda(pdfUrl) {
     const pdfBytes = await fetchPdfBytes(pdfUrl);
     const doc = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
 
+    // Offset each page's Y coordinates by a large amount so that items from
+    // different pages never share the same rounded Y value.  Without this,
+    // text that sits at the same vertical position on separate pages gets
+    // merged into a single row, causing qual-match durations to be computed
+    // incorrectly (e.g. two sessions at "Y=700" on pages 1 and 2 would be
+    // collapsed into one row and yield a single wrong duration instead of
+    // two correct ones).  Subtracting (page − 1) × 10 000 keeps pages in
+    // reading order when rows are later sorted descending by Y coordinate.
     const allItems = [];
     for (let i = 1; i <= doc.numPages; i++) {
       const page = await doc.getPage(i);
       const content = await page.getTextContent();
-      allItems.push(...content.items);
+      const yOffset = (i - 1) * 10000;
+      for (const item of content.items) {
+        const t = item.transform.slice();
+        t[5] = t[5] - yOffset;
+        allItems.push({ ...item, transform: t });
+      }
     }
 
     const minutes = parsePdfText(allItems);
@@ -489,7 +502,8 @@ function tableRow(label, value) {
 
 // ── Wire up events ─────────────────────────────────────────────────────────
 
-document.addEventListener('DOMContentLoaded', () => {
+/* c8 ignore next */
+if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded', () => {
   $('load-btn').addEventListener('click', handleLoadEvent);
   $('event-key').addEventListener('keydown', e => {
     if (e.key === 'Enter') handleLoadEvent();
