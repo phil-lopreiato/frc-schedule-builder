@@ -6,7 +6,7 @@ A single-page web app that helps you visualise and analyse an FRC event's qualif
 
 1. **Enter an event key** (e.g. `2024miket`).
 2. The app loads the **number of registered teams** from [The Blue Alliance](https://www.thebluealliance.com) API.
-3. It follows the redirect at `thebluealliance.com/event/<key>/agenda`, parses the linked Google Sheets agenda, and **auto-detects how many minutes are allocated to qualification matches**.
+3. It follows the redirect at `thebluealliance.com/event/<key>/agenda`, downloads the PDF agenda, parses it with **PDF.js** to auto-detect the qual-match time block, and pre-fills the value.
 4. You enter the **matches per team** and **match cycle time** (minutes per match including setup/reset).
 5. The app calculates:
    - Total number of qualification matches (3 v 3 — 6 team slots per match)
