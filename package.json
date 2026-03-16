@@ -1,0 +1,24 @@
+{
+  "name": "frc-schedule-builder",
+  "version": "1.0.0",
+  "description": "A single-page web app that helps you visualise and analyse an FRC event's qualification-match schedule.",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --experimental-vm-modules node_modules/.bin/jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/phil-lopreiato/frc-schedule-builder.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/phil-lopreiato/frc-schedule-builder/issues"
+  },
+  "homepage": "https://github.com/phil-lopreiato/frc-schedule-builder#readme",
+  "devDependencies": {
+    "jest": "^30.3.0"
+  }
+}
