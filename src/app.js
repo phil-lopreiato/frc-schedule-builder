@@ -1,9 +1,9 @@
 /**
  * FRC Schedule Builder
  *
- * Loads team count from The Blue Alliance API, follows the TBA agenda
- * redirect to a PDF, parses it with PDF.js to auto-detect the qual-match
- * time block, and lets users override the value if needed.
+ * Loads team count from The Blue Alliance API, fetches the agenda PDF
+ * directly from FIRST Inspires, parses it with PDF.js to auto-detect
+ * the qual-match time block, and lets users override the value if needed.
  */
 
 'use strict';
@@ -12,12 +12,6 @@
 
 const TBA_BASE    = 'https://www.thebluealliance.com/api/v3';
 const TBA_API_KEY = 'OgkQlossATyHZij8FEAKl0opKiW63fDDSf7Fcwnr9jcJON5XwiGHgmCVZvjFb1Lv';
-
-/**
- * Primary CORS proxy: allorigins returns
- *   { status: { url, content_type, http_code }, contents: "<body>" }
- */
-const ALLORIGINS = 'https://api.allorigins.win/get?url=';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -30,14 +24,6 @@ async function tbaFetch(path) {
     throw new Error(`TBA API returned ${response.status} for ${path}`);
   }
   return response.json();
-}
-
-/** Fetch a URL via the allorigins CORS proxy. */
-async function proxiedFetch(url) {
-  const proxyUrl = `${ALLORIGINS}${encodeURIComponent(url)}`;
-  const response = await fetch(proxyUrl);
-  if (!response.ok) throw new Error(`Proxy HTTP ${response.status}`);
-  return response.json();           // { status: {url, ...}, contents: string }
 }
 
 // ── PDF / time parsing ─────────────────────────────────────────────────────
@@ -126,23 +112,14 @@ export function parsePdfText(items) {
 const PDFJS_CDN = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.5.207/build';
 
 /**
- * Fetch PDF bytes for the given URL.  Tries a direct fetch first (fast, works
- * when the server sends CORS headers); falls back to the allorigins /raw
- * proxy which returns the binary body without JSON wrapping.
+ * Fetch PDF bytes for the given URL.
  * @param {string} url
  * @returns {Promise<Uint8Array>}
  */
 async function fetchPdfBytes(url) {
-  try {
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    return new Uint8Array(await resp.arrayBuffer());
-  } catch {
-    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-    const resp = await fetch(proxyUrl);
-    if (!resp.ok) throw new Error(`Proxy HTTP ${resp.status}`);
-    return new Uint8Array(await resp.arrayBuffer());
-  }
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return new Uint8Array(await resp.arrayBuffer());
 }
 
 /**
@@ -174,68 +151,50 @@ async function parsePdfAgenda(pdfUrl) {
 }
 
 /**
- * Load the event agenda by following the TBA redirect:
- *   https://www.thebluealliance.com/event/<key>/agenda
+ * Build the direct FIRST Inspires agenda PDF URL for a given event key.
+ * Pattern: https://info.firstinspires.org/hubfs/web/event/frc/{year}/{year}_{CODE}_Agenda.pdf
+ * Example: "2026nysu" → ".../2026/2026_NYSU_Agenda.pdf"
+ * @param {string} eventKey  Must be at least 5 characters (4-digit year + event code).
+ * @returns {string}
+ */
+export function firstInspiresPdfUrl(eventKey) {
+  if (!eventKey || eventKey.length < 5) {
+    throw new Error(`Invalid event key: "${eventKey}"`);
+  }
+  const year = eventKey.slice(0, 4);
+  const code = eventKey.slice(4).toUpperCase();
+  return `https://info.firstinspires.org/hubfs/web/event/frc/${year}/${year}_${code}_Agenda.pdf`;
+}
+
+/**
+ * Load the event agenda from the direct FIRST Inspires PDF URL constructed
+ * from the event key.
  *
  * Returns { qualMinutes, source, agendaUrl } where:
  *   qualMinutes – detected qual-match duration in minutes (null if not found)
  *   source      – human-readable description of what was found
- *   agendaUrl   – the final URL the agenda redirected to
+ *   agendaUrl   – the URL of the agenda PDF
  *
- * When the redirect leads to a PDF the agenda is fetched and parsed with
- * PDF.js to auto-detect the qual time block.
- *
- * Note: the TBA API key is intentionally included here because this is a
- * client-side SPA with no backend.  TBA API keys are public, rate-limited
- * credentials — not secrets.
+ * When the PDF is found it is fetched and parsed with PDF.js to auto-detect
+ * the qual time block.
  *
  * @param {string} eventKey
  * @returns {Promise<{qualMinutes:number|null, source:string, agendaUrl:string|null}>}
  */
 export async function loadAgendaInfo(eventKey) {
-  const agendaUrl = `https://www.thebluealliance.com/event/${eventKey}/agenda`;
-
-  let data;
+  let agendaUrl;
   try {
-    data = await proxiedFetch(agendaUrl);
+    agendaUrl = firstInspiresPdfUrl(eventKey);
   } catch (err) {
-    return { qualMinutes: null, source: `Could not fetch agenda: ${err.message}`, agendaUrl: null };
+    return { qualMinutes: null, source: err.message, agendaUrl: null };
   }
-
-  const finalUrl    = data.status?.url          ?? agendaUrl;
-  const content     = data.contents             ?? '';
-  const contentType = data.status?.content_type ?? '';
-
-  // ── 1. Did the proxy land on a PDF? ────────────────────────────────────
-  if (contentType.includes('application/pdf') || /\.pdf(\?|#|$)/i.test(finalUrl)) {
-    const minutes = await parsePdfAgenda(finalUrl);
-    return {
-      qualMinutes: minutes,
-      source: minutes
-        ? 'Parsed from PDF agenda'
-        : 'Agenda is a PDF — please enter qual time manually',
-      agendaUrl: finalUrl,
-    };
-  }
-
-  // ── 2. Is there a PDF link embedded in the page HTML? ───────────────────
-  const pdfMatch = content.match(/https?:\/\/[^\s"'<>]+\.pdf(?:[?#][^\s"'<>]*)?/i);
-  if (pdfMatch) {
-    const minutes = await parsePdfAgenda(pdfMatch[0]);
-    return {
-      qualMinutes: minutes,
-      source: minutes
-        ? 'Parsed from PDF agenda'
-        : 'Agenda is a PDF — please enter qual time manually',
-      agendaUrl: pdfMatch[0],
-    };
-  }
-
-  // ── 3. No recognizable agenda found ────────────────────────────────────
+  const minutes = await parsePdfAgenda(agendaUrl);
   return {
-    qualMinutes: null,
-    source: 'No agenda document found — please enter qual time manually',
-    agendaUrl: finalUrl !== agendaUrl ? finalUrl : null,
+    qualMinutes: minutes,
+    source: minutes
+      ? 'Parsed from PDF agenda'
+      : 'Agenda is a PDF — please enter qual time manually',
+    agendaUrl,
   };
 }
 
