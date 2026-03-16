@@ -48,6 +48,36 @@ describe('parsePdfText', () => {
     expect(parsePdfText(items)).toBe(665);
   });
 
+  test('handles time range in a single cell (actual 2026 NYSU format)', () => {
+    // The 2026 NYSU PDF (2026_NYSU_Agenda.pdf) uses combined range strings
+    // like "8:50AM - 12:00PM" in a single text cell rather than two separate
+    // time cells.  The three qual blocks total 665 min:
+    //   8:50AM – 12:00PM  = 190 min
+    //   1:00PM – 5:45PM   = 285 min
+    //   8:50AM – 12:00PM  = 190 min
+    const items = [
+      makeItem('Qualification Matches', 373),
+      makeItem('8:50AM - 12:00PM', 373),
+
+      makeItem('Qualification Matches', 346),
+      makeItem('1:00PM - 5:45PM', 346),
+
+      makeItem('Qualification Matches', 236),
+      makeItem('8:50AM - 12:00PM', 236),
+    ];
+    expect(parsePdfText(items)).toBe(665);
+  });
+
+  test('handles time range with en-dash in a single cell', () => {
+    // Some PDFs use an en-dash (–) rather than a hyphen-minus (-).
+    // 1:30 PM – 5:00 PM = 210 min
+    const items = [
+      makeItem('Qualification Matches', 500),
+      makeItem('1:30 PM \u2013 5:00 PM', 500),
+    ];
+    expect(parsePdfText(items)).toBe(210);
+  });
+
   test('handles qual rows where label and times are on slightly different baselines', () => {
     // Label at Y=700, times at Y=698 (±2 rounding → same row after Math.round)
     const items = [

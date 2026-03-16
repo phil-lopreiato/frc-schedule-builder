@@ -64,11 +64,17 @@ function parseTimeMinutes(str) {
  * Given an array of cell strings, return the duration in minutes inferred
  * from the minimum and maximum valid time values found among them.
  * Returns null if fewer than two valid times are found.
+ *
+ * Cells that contain a time range (e.g. "8:50AM - 12:00PM" or
+ * "1:00 PM – 5:45 PM") are split on the dash/en-dash separator so that
+ * both the start and end time are considered individually.
  * @param {string[]} cells
  * @returns {number|null}
  */
 function rowDurationMinutes(cells) {
-  const times = cells.map(parseTimeMinutes).filter(t => t !== null);
+  // Expand "HH:MM AM - HH:MM PM"-style range strings into individual tokens.
+  const tokens = cells.flatMap(cell => cell.split(/\s*[-\u2013]\s*/));
+  const times = tokens.map(parseTimeMinutes).filter(t => t !== null);
   if (times.length < 2) return null;
   const duration = Math.max(...times) - Math.min(...times);
   // Sanity: ignore unrealistic values (> 12 h or ≤ 0)
