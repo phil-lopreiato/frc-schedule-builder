@@ -1,9 +1,8 @@
 /**
  * FRC Schedule Builder
  *
- * Loads team count from The Blue Alliance API and tries to parse the
- * qual-match time block from the event agenda (typically a Google Sheets
- * redirect).  Users can override the detected time or enter it manually.
+ * Loads team count from The Blue Alliance API and finds the event agenda
+ * PDF linked from the TBA agenda page.  Users enter qual time manually.
  */
 
 'use strict';
@@ -40,142 +39,6 @@ async function proxiedFetch(url) {
   return response.json();           // { status: {url, ...}, contents: string }
 }
 
-// ── CSV parsing ────────────────────────────────────────────────────────────
-
-/**
- * Parse a single CSV line respecting double-quoted fields.
- * @param {string} line
- * @returns {string[]}
- */
-function parseCSVLine(line) {
-  const cells = [];
-  let current = '';
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (ch === ',' && !inQuotes) {
-      cells.push(current.trim());
-      current = '';
-    } else {
-      current += ch;
-    }
-  }
-  cells.push(current.trim());
-  return cells;
-}
-
-/**
- * Convert a time string like "10:30 AM", "14:30", or "2:30 PM" into minutes
- * since midnight.  Returns null if the string is not a recognizable time.
- * @param {string} str
- * @returns {number|null}
- */
-function parseTimeMinutes(str) {
-  if (!str) return null;
-  str = str.trim();
-
-  // 12-hour format: "10:30 AM" / "2:30 PM"
-  const m12 = str.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-  if (m12) {
-    let h = parseInt(m12[1], 10);
-    const m = parseInt(m12[2], 10);
-    const p = m12[3].toUpperCase();
-    if (p === 'PM' && h !== 12) h += 12;
-    if (p === 'AM' && h === 12) h = 0;
-    return h * 60 + m;
-  }
-
-  // 24-hour format: "14:30"
-  const m24 = str.match(/^(\d{1,2}):(\d{2})$/);
-  if (m24) {
-    const h = parseInt(m24[1], 10);
-    const m = parseInt(m24[2], 10);
-    if (h <= 23 && m <= 59) return h * 60 + m;
-  }
-
-  return null;
-}
-
-/**
- * Given a parsed CSV row (array of cell strings) find and return the duration
- * in minutes inferred from the first and last valid time values in the row.
- * Returns null if fewer than two valid times are found.
- * @param {string[]} cells
- * @returns {number|null}
- */
-function rowDurationMinutes(cells) {
-  const times = cells.map(parseTimeMinutes).filter(t => t !== null);
-  if (times.length < 2) return null;
-  const duration = Math.max(...times) - Math.min(...times);
-  // Sanity: ignore unrealistic values (> 12 h or ≤ 0)
-  return duration > 0 && duration <= 720 ? duration : null;
-}
-
-/**
- * Parse a Google Sheets CSV export and sum up all time blocks whose row
- * text contains "qual" or "qualification" (case-insensitive).
- * @param {string} csvText
- * @returns {number} total minutes (0 if none found)
- */
-export function parseAgendaCsv(csvText) {
-  const lines = csvText.split('\n');
-  let totalMinutes = 0;
-
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    const cells = parseCSVLine(line);
-    const rowText = cells.join(' ').toLowerCase();
-
-    if (rowText.includes('qual') || rowText.includes('qualification')) {
-      const dur = rowDurationMinutes(cells);
-      if (dur !== null) totalMinutes += dur;
-    }
-  }
-
-  return totalMinutes;
-}
-
-// ── Agenda loading ─────────────────────────────────────────────────────────
-
-/**
- * Extract a Google Sheets spreadsheet ID from a URL.
- * @param {string} url
- * @returns {string|null}
- */
-function sheetsIdFromUrl(url) {
-  const m = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
-  return m ? m[1] : null;
-}
-
-/**
- * Given a Google Sheets URL, fetch the first sheet as CSV via the
- * Visualisation Query API and parse qual-match minutes.
- * @param {string} sheetsUrl
- * @returns {Promise<number|null>}
- */
-async function parseGoogleSheetsAgenda(sheetsUrl) {
-  const id = sheetsIdFromUrl(sheetsUrl);
-  if (!id) return null;
-
-  const csvUrl = `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv`;
-  try {
-    const data = await proxiedFetch(csvUrl);
-    if (!data.contents) return null;
-    const minutes = parseAgendaCsv(data.contents);
-    return minutes > 0 ? minutes : null;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Load the event agenda by following the TBA redirect:
  *   https://www.thebluealliance.com/event/<key>/agenda
@@ -202,33 +65,26 @@ export async function loadAgendaInfo(eventKey) {
     return { qualMinutes: null, source: `Could not fetch agenda: ${err.message}`, agendaUrl: null };
   }
 
-  const finalUrl  = data.status?.url  ?? agendaUrl;
-  const content   = data.contents ?? '';
+  const finalUrl    = data.status?.url          ?? agendaUrl;
+  const content     = data.contents             ?? '';
+  const contentType = data.status?.content_type ?? '';
 
-  // ── 1. Did the proxy land on a Google Sheets URL? ──────────────────────
-  if (finalUrl.includes('docs.google.com/spreadsheets')) {
-    const minutes = await parseGoogleSheetsAgenda(finalUrl);
+  // ── 1. Did the proxy land on a PDF? ────────────────────────────────────
+  if (contentType.includes('application/pdf') || /\.pdf(\?|#|$)/i.test(finalUrl)) {
     return {
-      qualMinutes: minutes,
-      source: minutes
-        ? `Parsed from Google Sheets agenda`
-        : `Found Google Sheets agenda but could not detect qual time`,
+      qualMinutes: null,
+      source: 'Agenda is a PDF — please enter qual time manually',
       agendaUrl: finalUrl,
     };
   }
 
-  // ── 2. Is there a Sheets link embedded in the page HTML? ────────────────
-  const sheetsMatch = content.match(
-    /https:\/\/docs\.google\.com\/spreadsheets\/d\/[a-zA-Z0-9_-]+(?:\/[^\s"'<>]*)*/
-  );
-  if (sheetsMatch) {
-    const minutes = await parseGoogleSheetsAgenda(sheetsMatch[0]);
+  // ── 2. Is there a PDF link embedded in the page HTML? ───────────────────
+  const pdfMatch = content.match(/https?:\/\/[^\s"'<>]+\.pdf(?:[?#][^\s"'<>]*)?/i);
+  if (pdfMatch) {
     return {
-      qualMinutes: minutes,
-      source: minutes
-        ? `Parsed from linked Google Sheets agenda`
-        : `Found linked Google Sheets agenda but could not detect qual time`,
-      agendaUrl: sheetsMatch[0],
+      qualMinutes: null,
+      source: 'Agenda is a PDF — please enter qual time manually',
+      agendaUrl: pdfMatch[0],
     };
   }
 
