@@ -1,96 +1,522 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FRC Schedule Builder</title>
-  <link rel="stylesheet" href="src/style.css" />
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FRC Schedule Visualizer</title>
+<style>
+:root {
+  --bg: #FAFAFA; --surface: #FFFFFF; --text: #1A1A1A;
+  --muted: #6B7280; --border: #D1D5DB; --accent: #3B82F6;
+  --success: #10B981; --warning: #F59E0B; --error: #EF4444;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0F0F0F; --surface: #1A1A1A; --text: #F0F0F0;
+    --muted: #9CA3AF; --border: #374151; --accent: #3B82F6;
+    --success: #10B981; --warning: #F59E0B; --error: #EF4444;
+  }
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  background: var(--bg); color: var(--text);
+  line-height: 1.5; min-height: 100vh;
+}
+.container { max-width: 960px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 4px; }
+h2 { font-size: 1.25rem; font-weight: 600; margin: 24px 0 12px; }
+.subtitle { color: var(--muted); font-size: 0.875rem; margin-bottom: 24px; }
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 20px; margin-bottom: 16px;
+}
+.input-row {
+  display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;
+}
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label { font-size: 0.8rem; font-weight: 500; color: var(--muted); }
+.field input, .field select {
+  height: 40px; padding: 0 12px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--surface); color: var(--text);
+  font-size: 0.9rem; min-width: 0;
+}
+.field input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
+button {
+  height: 40px; padding: 0 20px; border: none; border-radius: 6px;
+  background: var(--accent); color: #fff; font-weight: 600;
+  font-size: 0.9rem; cursor: pointer; transition: all 0.15s ease;
+  white-space: nowrap;
+}
+button:hover { filter: brightness(1.1); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.stats-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px; margin: 16px 0;
+}
+.stat {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 14px; text-align: center;
+}
+.stat-value { font-size: 1.75rem; font-weight: 700; line-height: 1.2; }
+.stat-label { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+.fit { color: var(--success); }
+.tight { color: var(--warning); }
+.over { color: var(--error); }
+.timeline-container { margin: 16px 0; }
+.day-label { font-weight: 600; font-size: 0.85rem; margin: 12px 0 6px; color: var(--muted); }
+.timeline-bar {
+  position: relative; height: 44px; border-radius: 6px;
+  background: var(--surface); border: 1px solid var(--border);
+  overflow: hidden; margin-bottom: 8px;
+}
+.timeline-fill {
+  position: absolute; top: 0; left: 0; height: 100%;
+  border-radius: 5px; transition: width 0.3s ease;
+  display: flex; align-items: center; padding-left: 10px;
+  font-size: 0.8rem; font-weight: 600; color: #fff;
+  white-space: nowrap; overflow: hidden;
+}
+.timeline-meta {
+  display: flex; justify-content: space-between;
+  font-size: 0.75rem; color: var(--muted); margin-top: 2px;
+}
+.block-list { margin: 12px 0; }
+.block-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+  font-size: 0.875rem;
+}
+.block-item:last-child { border-bottom: none; }
+.block-time { font-weight: 500; }
+.block-dur { color: var(--muted); font-size: 0.8rem; }
+#status { margin: 12px 0; font-size: 0.875rem; }
+.status-loading { color: var(--accent); }
+.status-error { color: var(--error); }
+.status-ok { color: var(--success); }
+.event-header { margin-bottom: 16px; }
+.event-name { font-size: 1.1rem; font-weight: 600; }
+.event-detail { font-size: 0.85rem; color: var(--muted); }
+.hidden { display: none !important; }
+#results { transition: opacity 0.2s ease; }
+@media (max-width: 640px) {
+  .input-row { flex-direction: column; }
+  .field { width: 100%; }
+  .field input { width: 100%; }
+  button { width: 100%; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
 </head>
 <body>
-  <div class="app">
+<div class="container">
+  <h1>🤖 FRC Schedule Visualizer</h1>
+  <p class="subtitle">See how qual matches fit into your event agenda</p>
 
-    <header class="app-header">
-      <div class="header-content">
-        <h1>🤖 FRC Schedule Builder</h1>
-        <p>Analyze how your qualification match schedule fits into the allotted event time</p>
+  <div class="card">
+    <div class="input-row">
+      <div class="field" style="flex:2;min-width:160px">
+        <label>Event Code</label>
+        <input id="eventCode" type="text" placeholder="e.g. 2024miket" spellcheck="false">
       </div>
-    </header>
-
-    <main class="app-main">
-
-      <!-- Step 1 — Load Event -->
-      <section class="card" id="loader-card">
-        <h2><span class="step-badge">1</span> Load Event</h2>
-        <div class="input-row">
-          <div class="input-group">
-            <label for="event-key">Event Key</label>
-            <input
-              type="text"
-              id="event-key"
-              placeholder="e.g. 2024miket"
-              autocomplete="off"
-              spellcheck="false"
-            />
-          </div>
-          <button class="btn btn-primary" id="load-btn">Load Event</button>
-        </div>
-        <div id="load-error" class="alert alert-error hidden"></div>
-        <div id="load-status" class="status-row hidden">
-          <span class="spinner"></span>
-          <span id="load-status-text">Loading…</span>
-        </div>
-      </section>
-
-      <!-- Step 2 — Parameters -->
-      <section class="card hidden" id="params-card">
-        <h2><span class="step-badge">2</span> Schedule Parameters</h2>
-
-        <div class="info-grid" id="event-info-grid">
-          <!-- populated by JS -->
-        </div>
-
-        <div id="agenda-alert" class="alert hidden"></div>
-
-        <div class="params-grid">
-          <div class="input-group">
-            <label for="matches-per-team">Matches per Team</label>
-            <input type="number" id="matches-per-team" value="10" min="1" max="20" />
-          </div>
-          <div class="input-group">
-            <label for="cycle-time">Cycle Time (min / match)</label>
-            <input type="number" id="cycle-time" value="7" min="1" max="30" step="0.5" />
-          </div>
-          <div class="input-group">
-            <label for="qual-time">
-              Qual Time Available (min)
-              <span class="label-badge" id="qual-time-badge" style="display:none"></span>
-            </label>
-            <input type="number" id="qual-time" min="1" placeholder="Minutes for qual matches" />
-          </div>
-        </div>
-
-        <button class="btn btn-primary" id="calculate-btn">Calculate Schedule</button>
-      </section>
-
-      <!-- Step 3 — Results -->
-      <section class="card hidden" id="results-card">
-        <h2><span class="step-badge">3</span> Schedule Analysis</h2>
-        <div id="results-content">
-          <!-- populated by JS -->
-        </div>
-      </section>
-
-    </main>
-
-    <footer class="app-footer">
-      <p>
-        Match schedule data provided by
-        <a href="https://www.thebluealliance.com" target="_blank" rel="noopener">The Blue Alliance</a>
-      </p>
-    </footer>
-
+      <button id="loadBtn" onclick="loadEvent()">Load Event</button>
+    </div>
+    <div id="status"></div>
   </div>
 
-  <script type="module" src="src/app.js"></script>
+  <div id="results" class="hidden">
+    <div class="card">
+      <div class="event-header">
+        <div class="event-name" id="eventName"></div>
+        <div class="event-detail" id="eventDetail"></div>
+      </div>
+
+      <h2>Agenda — Qual Match Blocks</h2>
+      <div class="block-list" id="blockList"></div>
+
+      <div class="input-row" style="margin-top:16px;">
+        <div class="field" style="flex:1">
+          <label>Teams</label>
+          <input id="teamCount" type="number" value="" min="1" max="100" onchange="recalc()" oninput="recalc()" placeholder="—">
+        </div>
+        <div class="field" style="flex:1">
+          <label>Matches Per Team</label>
+          <input id="matchesPerTeam" type="number" value="10" min="1" max="20" onchange="recalc()" oninput="recalc()">
+        </div>
+        <div class="field" style="flex:1">
+          <label>Cycle Time (min)</label>
+          <input id="cycleTime" type="number" value="7" min="2" max="15" step="0.5" onchange="recalc()" oninput="recalc()">
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Schedule Fit</h2>
+      <div class="stats-grid" id="statsGrid"></div>
+    </div>
+
+    <div class="card">
+      <h2>Timeline</h2>
+      <div class="timeline-container" id="timeline"></div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+const PDFJS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379';
+const TBA_KEY = 'OgkQlossATyHZij8FEAKl0opKiW63fDDSf7Fcwnr9jcJON5XwiGHgmCVZvjFb1Lv';
+
+let state = { teams: 0, blocks: [], eventName: '' };
+
+function setStatus(msg, cls) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = cls ? 'status-' + cls : '';
+}
+
+function parseTime12(s) {
+  // Parse "11:00AM" or "1:00PM" => minutes since midnight
+  s = s.trim().toUpperCase();
+  const m = s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/);
+  if (!m) return null;
+  let h = parseInt(m[1]), min = parseInt(m[2]), ap = m[3];
+  if (ap === 'PM' && h !== 12) h += 12;
+  if (ap === 'AM' && h === 12) h = 0;
+  return h * 60 + min;
+}
+
+function fmtTime(mins) {
+  let h = Math.floor(mins / 60), m = mins % 60;
+  const ap = h >= 12 ? 'PM' : 'AM';
+  if (h > 12) h -= 12;
+  if (h === 0) h = 12;
+  return h + ':' + String(m).padStart(2,'0') + ' ' + ap;
+}
+
+async function fetchTeams(code) {
+  const url = `https://www.thebluealliance.com/api/v3/event/${code}/teams`;
+  const r = await fetch(url, { headers: { 'X-TBA-Auth-Key': TBA_KEY } });
+  if (!r.ok) throw new Error('TBA API error: ' + r.status);
+  const data = await r.json();
+  return data;
+}
+
+async function fetchEventInfo(code) {
+  const url = `https://www.thebluealliance.com/api/v3/event/${code}`;
+  const r = await fetch(url, { headers: { 'X-TBA-Auth-Key': TBA_KEY } });
+  if (!r.ok) return null;
+  return await r.json();
+}
+
+async function fetchAgendaPDF(code) {
+  const year = code.substring(0, 4);
+  const eventPart = code.substring(4).toUpperCase();
+  // Try the direct FIRST URL pattern
+  const directUrl = `https://info.firstinspires.org/hubfs/web/event/frc/${year}/${year}_${eventPart}_Agenda.pdf`;
+
+  // Also try TBA redirect
+  const tbaUrl = `https://www.thebluealliance.com/event/${code}/agenda`;
+
+  // Try direct first
+  let urls = [directUrl, tbaUrl];
+  for (const url of urls) {
+    try {
+      const r = await fetch(url, { mode: 'cors' });
+      if (r.ok) {
+        const ct = r.headers.get('content-type') || '';
+        if (ct.includes('pdf') || url.endsWith('.pdf')) {
+          return await r.arrayBuffer();
+        }
+        // If HTML, check for redirect meta/link
+        const text = await r.text();
+        const redir = text.match(/url=([^"\s>]+\.pdf)/i);
+        if (redir) {
+          const r2 = await fetch(redir[1]);
+          if (r2.ok) return await r2.arrayBuffer();
+        }
+      }
+    } catch(e) { /* try next */ }
+  }
+  throw new Error('Could not fetch agenda PDF. It may not be available for this event, or CORS may be blocking it.');
+}
+
+async function parsePDF(buf) {
+  // Load PDF.js
+  const pdfjsLib = await import(PDFJS_CDN + '/pdf.min.mjs');
+  pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_CDN + '/pdf.worker.min.mjs';
+
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  let allText = '';
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const tc = await page.getTextContent();
+    // Group text items by Y position to reconstruct lines
+    const byY = {};
+    for (const item of tc.items) {
+      const y = Math.round(item.transform[5]); // Y coordinate
+      if (!byY[y]) byY[y] = [];
+      byY[y].push({ x: item.transform[4], str: item.str });
+    }
+    // Sort by Y descending (PDF coordinates: top = higher Y)
+    const sortedYs = Object.keys(byY).map(Number).sort((a, b) => b - a);
+    for (const y of sortedYs) {
+      const items = byY[y].sort((a, b) => a.x - b.x);
+      allText += items.map(it => it.str).join(' ').trim() + '\n';
+    }
+  }
+  return allText;
+}
+
+function parseQualBlocks(text) {
+  const blocks = [];
+  const lines = text.replace(/\r/g, '').split('\n');
+  
+  // Day pattern: "Friday, March 20" or "Saturday, March 1, 2025"
+  const dayRe = /\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b[,]?\s+(\w+\s+\d{1,2})/i;
+  const qualRe = /(\d{1,2}:\d{2}\s*[AaPp][Mm])\s*[-–—]\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])\s+Qualification\s+Match/i;
+  
+  let currentDay = '';
+  let blockNum = 0;
+  
+  // PDF.js may join items with spaces — also scan the joined text per-page
+  // But first try line-by-line
+  for (const line of lines) {
+    const dayMatch = dayRe.exec(line);
+    if (dayMatch) {
+      currentDay = dayMatch[1].substring(0, 3) + ' ' + dayMatch[2]; // "Fri March 20"
+    }
+    const qualMatch = qualRe.exec(line);
+    if (qualMatch) {
+      const start = parseTime12(qualMatch[1]);
+      const end = parseTime12(qualMatch[2]);
+      if (start !== null && end !== null && end > start) {
+        blockNum++;
+        blocks.push({ start, end, duration: end - start, startStr: qualMatch[1].trim(), endStr: qualMatch[2].trim(), day: currentDay || ('Block ' + blockNum) });
+      }
+    }
+  }
+  
+  // Fallback: if line-by-line found nothing, try on joined text (handles PDF.js concatenation)
+  if (blocks.length === 0) {
+    const fullText = text.replace(/\n/g, ' ');
+    const reG = /(\d{1,2}:\d{2}\s*[AaPp][Mm])\s*[-–—]\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])\s+Qualification\s+Match/gi;
+    let m;
+    while ((m = reG.exec(fullText)) !== null) {
+      const start = parseTime12(m[1]);
+      const end = parseTime12(m[2]);
+      blockNum++;
+      if (start !== null && end !== null && end > start) {
+        blocks.push({ start, end, duration: end - start, startStr: m[1].trim(), endStr: m[2].trim(), day: 'Block ' + blockNum });
+      }
+    }
+  }
+  
+  return blocks;
+}
+
+window.loadEvent = async function() {
+  const code = document.getElementById('eventCode').value.trim().toLowerCase();
+  if (!code) { setStatus('Enter an event code', 'error'); return; }
+
+  const btn = document.getElementById('loadBtn');
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+  setStatus('Fetching event data...', 'loading');
+  document.getElementById('results').classList.add('hidden');
+
+  try {
+    // Fetch teams and event info in parallel, PDF separately
+    const [teams, info] = await Promise.all([
+      fetchTeams(code),
+      fetchEventInfo(code)
+    ]);
+
+    state.teams = teams.length;
+    document.getElementById('teamCount').value = state.teams;
+    state.eventName = info ? info.name : code;
+    const loc = info ? (info.city + ', ' + info.state_prov) : '';
+
+    document.getElementById('eventName').textContent = state.eventName;
+    document.getElementById('eventDetail').textContent =
+      state.teams + ' teams' + (loc ? ' · ' + loc : '');
+
+    setStatus('Fetching agenda PDF...', 'loading');
+
+    let blocks = [];
+    try {
+      const pdfBuf = await fetchAgendaPDF(code);
+      setStatus('Parsing PDF...', 'loading');
+      const text = await parsePDF(pdfBuf);
+      blocks = parseQualBlocks(text);
+      if (blocks.length === 0) {
+        setStatus('PDF loaded but no "Qualification Matches" time blocks found. You can enter blocks manually.', 'error');
+      }
+    } catch (e) {
+      setStatus('Could not load agenda PDF: ' + e.message + '. You can enter total minutes manually below.', 'error');
+    }
+
+    state.blocks = blocks;
+    renderBlocks();
+    recalc();
+    document.getElementById('results').classList.remove('hidden');
+    if (blocks.length > 0) setStatus('Loaded successfully!', 'ok');
+
+  } catch (e) {
+    setStatus('Error: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Load Event';
+  }
+};
+
+function renderBlocks() {
+  const el = document.getElementById('blockList');
+  if (state.blocks.length === 0) {
+    el.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:0.85rem">' +
+      'No qual blocks parsed. Enter a manual override:' +
+      '<div style="margin-top:8px"><label style="font-size:0.8rem;font-weight:500">Total Available Minutes</label>' +
+      '<input id="manualMinutes" type="number" value="360" min="1" ' +
+      'style="height:36px;padding:0 10px;border:1px solid var(--border);border-radius:6px;' +
+      'background:var(--surface);color:var(--text);font-size:0.9rem;width:120px;margin-left:8px" ' +
+      'onchange="recalc()" oninput="recalc()"></div></div>';
+    return;
+  }
+  let h = '';
+  for (const b of state.blocks) {
+    h += '<div class="block-item">' +
+      '<span class="block-time">' + (b.day ? '<strong>' + b.day + '</strong> ' : '') + fmtTime(b.start) + ' – ' + fmtTime(b.end) + '</span>' +
+      '<span class="block-dur">' + b.duration + ' min</span></div>';
+  }
+  el.innerHTML = h;
+}
+
+window.recalc = function() {
+  if (state.blocks.length === 0) return;
+
+  const mpt = parseInt(document.getElementById('matchesPerTeam').value) || 10;
+  const ct = parseFloat(document.getElementById('cycleTime').value) || 7;
+  const numTeams = parseInt(document.getElementById('teamCount').value) || state.teams;
+  if (numTeams === 0) return;
+
+  // Total match slots needed
+  const totalSlots = numTeams * mpt;
+  const teamsPerMatch = 6; // 3v3
+  const totalMatches = Math.ceil(totalSlots / teamsPerMatch);
+  const surrogates = (totalMatches * teamsPerMatch) - totalSlots;
+
+  // Time
+  const timeNeeded = totalMatches * ct;
+  let availableMin = 0;
+  if (state.blocks.length > 0) {
+    availableMin = state.blocks.reduce((s, b) => s + b.duration, 0);
+  } else {
+    const manEl = document.getElementById('manualMinutes');
+    availableMin = manEl ? parseInt(manEl.value) || 360 : 360;
+  }
+
+  const surplus = availableMin - timeNeeded;
+  const pct = availableMin > 0 ? (timeNeeded / availableMin * 100) : 100;
+  const mpr = ct > 0 ? (60 / ct) : 0;
+
+  let fitClass, fitLabel;
+  if (pct <= 85) { fitClass = 'fit'; fitLabel = 'Comfortable'; }
+  else if (pct <= 100) { fitClass = 'tight'; fitLabel = 'Tight'; }
+  else { fitClass = 'over'; fitLabel = 'Over Capacity'; }
+
+  // Required cycle time to fit
+  const reqCycle = availableMin > 0 ? (availableMin / totalMatches) : 0;
+
+  // Render stats
+  const sg = document.getElementById('statsGrid');
+  sg.innerHTML =
+    stat(totalMatches, 'Total Matches') +
+    stat(surrogates, 'Surrogates') +
+    stat(mpr.toFixed(1), 'Matches / Hour') +
+    stat(Math.round(timeNeeded) + ' min', 'Time Needed') +
+    stat(availableMin + ' min', 'Time Available') +
+    stat((surplus >= 0 ? '+' : '') + Math.round(surplus) + ' min',
+      surplus >= 0 ? 'Buffer' : 'Overflow', fitClass) +
+    stat(pct.toFixed(0) + '%', 'Capacity Used', fitClass) +
+    stat(fitLabel, 'Status', fitClass) +
+    stat(reqCycle.toFixed(1) + ' min', 'Max Cycle to Fit');
+
+  renderTimeline(totalMatches, ct, availableMin, fitClass);
+};
+
+function stat(val, label, cls) {
+  return '<div class="stat"><div class="stat-value ' + (cls||'') + '">' +
+    val + '</div><div class="stat-label">' + label + '</div></div>';
+}
+
+function renderTimeline(totalMatches, cycleTime, totalAvail, fitClass) {
+  const el = document.getElementById('timeline');
+  if (state.blocks.length === 0) {
+    // Simple single bar
+    const pct = Math.min((totalMatches * cycleTime) / totalAvail * 100, 120);
+    const color = fitClass === 'fit' ? 'var(--success)' :
+                  fitClass === 'tight' ? 'var(--warning)' : 'var(--error)';
+    el.innerHTML =
+      '<div class="timeline-bar">' +
+      '<div class="timeline-fill" style="width:' + Math.min(pct,100) + '%;background:' + color + '">' +
+      totalMatches + ' matches (' + Math.round(totalMatches * cycleTime) + ' min)</div></div>' +
+      '<div class="timeline-meta"><span>0 min</span><span>' + totalAvail + ' min</span></div>';
+    return;
+  }
+
+  // Distribute matches across blocks
+  let matchesLeft = totalMatches;
+  let html = '';
+  let dayTracker = '';
+
+  for (const block of state.blocks) {
+    // Day grouping
+    const dayStr = block.start < 720 ? 'Morning' : 'Afternoon';
+    const matchesFit = Math.floor(block.duration / cycleTime);
+    const used = Math.min(matchesFit, matchesLeft);
+    const usedTime = used * cycleTime;
+    matchesLeft -= used;
+
+    const fillPct = block.duration > 0 ? Math.min(usedTime / block.duration * 100, 100) : 0;
+    const overPct = matchesLeft > 0 && used === matchesFit ? 100 : fillPct;
+
+    let color;
+    if (matchesLeft > 0 && used === matchesFit) color = 'var(--accent)';
+    else if (fillPct > 85) color = 'var(--warning)';
+    else color = 'var(--success)';
+
+    const blockLabel = used + ' matches · ' + Math.round(usedTime) + '/' + block.duration + ' min';
+
+    const dayLabel = block.day ? '<strong>' + block.day + '</strong> — ' : '';
+    html += '<div class="timeline-bar" title="' + (block.day || '') + ' ' + fmtTime(block.start) + '-' + fmtTime(block.end) + '">' +
+      '<div class="timeline-fill" style="width:' + fillPct + '%;background:' + color + '">' +
+      blockLabel + '</div></div>' +
+      '<div class="timeline-meta"><span>' + dayLabel + fmtTime(block.start) + '</span>' +
+      '<span>' + block.duration + ' min available</span>' +
+      '<span>' + fmtTime(block.end) + '</span></div>';
+  }
+
+  if (matchesLeft > 0) {
+    html += '<div style="margin-top:12px;padding:12px;background:rgba(239,68,68,0.1);' +
+      'border-radius:6px;color:var(--error);font-weight:600;font-size:0.9rem">' +
+      '⚠️ ' + matchesLeft + ' matches don\'t fit! Need ' +
+      Math.round(matchesLeft * cycleTime) + ' more minutes.</div>';
+  }
+
+  el.innerHTML = html;
+}
+
+// Enter key triggers load
+document.getElementById('eventCode').addEventListener('keydown', e => {
+  if (e.key === 'Enter') loadEvent();
+});
+
+// Auto-load from URL hash
+if (location.hash) {
+  document.getElementById('eventCode').value = location.hash.slice(1);
+  loadEvent();
+}
+</script>
 </body>
 </html>
