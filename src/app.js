@@ -82,6 +82,10 @@ function rowDurationMinutes(cells) {
  * Items are grouped into rows by their Y position (transform[5]), then each
  * row is checked for a qual label and parseable start/end times.
  *
+ * If a qual row contains no parseable times (e.g. the activity label and time
+ * columns sit on slightly different baselines in the PDF), up to two adjacent
+ * rows are merged with it to recover the times.
+ *
  * @param {Array<{str: string, transform: number[]}>} items
  * @returns {number} total minutes (0 if none found)
  */
@@ -95,11 +99,32 @@ export function parsePdfText(items) {
     rowMap.get(y).push(item.str);
   }
 
+  // Sort rows top-to-bottom (PDF Y=0 is at the bottom, so higher Y = higher
+  // on the page; sorting descending gives top-to-bottom reading order).
+  const rows = [...rowMap.entries()]
+    .sort(([a], [b]) => b - a)
+    .map(([, cells]) => cells);
+
   let totalMinutes = 0;
-  for (const cells of rowMap.values()) {
-    const rowText = cells.join(' ').toLowerCase();
+  for (let i = 0; i < rows.length; i++) {
+    const rowText = rows[i].join(' ').toLowerCase();
     if (rowText.includes('qual') || rowText.includes('qualification')) {
-      const dur = rowDurationMinutes(cells);
+      let dur = rowDurationMinutes(rows[i]);
+
+      // If no times were found in the qual row itself, the PDF may place the
+      // activity label and time values on slightly different baselines.  Try
+      // merging with neighbouring rows to find the associated times.
+      // Search order: i+1, i-1, i+2, i-2 (closest rows first in both
+      // directions before widening the search).
+      if (dur === null) {
+        for (let offset = 1; dur === null && offset <= 2; offset++) {
+          const next = rows[i + offset];
+          const prev = rows[i - offset];
+          if (next) dur = rowDurationMinutes([...rows[i], ...next]);
+          if (dur === null && prev) dur = rowDurationMinutes([...rows[i], ...prev]);
+        }
+      }
+
       if (dur !== null) totalMinutes += dur;
     }
   }
