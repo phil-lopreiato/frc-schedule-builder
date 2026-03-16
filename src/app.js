@@ -1,8 +1,9 @@
 /**
  * FRC Schedule Builder
  *
- * Loads team count from The Blue Alliance API and finds the event agenda
- * PDF linked from the TBA agenda page.  Users enter qual time manually.
+ * Loads team count from The Blue Alliance API, follows the TBA agenda
+ * redirect to a PDF, parses it with PDF.js to auto-detect the qual-match
+ * time block, and lets users override the value if needed.
  */
 
 'use strict';
@@ -39,6 +40,139 @@ async function proxiedFetch(url) {
   return response.json();           // { status: {url, ...}, contents: string }
 }
 
+// ── PDF / time parsing ─────────────────────────────────────────────────────
+
+/**
+ * Convert a time string like "10:30 AM", "14:30", or "2:30 PM" into minutes
+ * since midnight.  Returns null if the string is not a recognizable time.
+ * @param {string} str
+ * @returns {number|null}
+ */
+function parseTimeMinutes(str) {
+  if (!str) return null;
+  str = str.trim();
+
+  // 12-hour format: "10:30 AM" / "2:30 PM"
+  const m12 = str.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (m12) {
+    let h = parseInt(m12[1], 10);
+    const m = parseInt(m12[2], 10);
+    const p = m12[3].toUpperCase();
+    if (p === 'PM' && h !== 12) h += 12;
+    if (p === 'AM' && h === 12) h = 0;
+    return h * 60 + m;
+  }
+
+  // 24-hour format: "14:30"
+  const m24 = str.match(/^(\d{1,2}):(\d{2})$/);
+  if (m24) {
+    const h = parseInt(m24[1], 10);
+    const m = parseInt(m24[2], 10);
+    if (h <= 23 && m <= 59) return h * 60 + m;
+  }
+
+  return null;
+}
+
+/**
+ * Given an array of cell strings, return the duration in minutes inferred
+ * from the minimum and maximum valid time values found among them.
+ * Returns null if fewer than two valid times are found.
+ * @param {string[]} cells
+ * @returns {number|null}
+ */
+function rowDurationMinutes(cells) {
+  const times = cells.map(parseTimeMinutes).filter(t => t !== null);
+  if (times.length < 2) return null;
+  const duration = Math.max(...times) - Math.min(...times);
+  // Sanity: ignore unrealistic values (> 12 h or ≤ 0)
+  return duration > 0 && duration <= 720 ? duration : null;
+}
+
+/**
+ * Parse an array of PDF.js text items and sum up all time blocks whose row
+ * text contains "qual" or "qualification" (case-insensitive).
+ *
+ * Items are grouped into rows by their Y position (transform[5]), then each
+ * row is checked for a qual label and parseable start/end times.
+ *
+ * @param {Array<{str: string, transform: number[]}>} items
+ * @returns {number} total minutes (0 if none found)
+ */
+export function parsePdfText(items) {
+  // Group text items by rounded Y coordinate to reconstruct rows
+  const rowMap = new Map();
+  for (const item of items) {
+    if (!item.str) continue;
+    const y = Math.round(item.transform[5]);
+    if (!rowMap.has(y)) rowMap.set(y, []);
+    rowMap.get(y).push(item.str);
+  }
+
+  let totalMinutes = 0;
+  for (const cells of rowMap.values()) {
+    const rowText = cells.join(' ').toLowerCase();
+    if (rowText.includes('qual') || rowText.includes('qualification')) {
+      const dur = rowDurationMinutes(cells);
+      if (dur !== null) totalMinutes += dur;
+    }
+  }
+  return totalMinutes;
+}
+
+/** CDN base for pdfjs-dist (exact version pinned; dynamic import() does not
+ *  support Subresource Integrity, so pinning to a specific semver patch is
+ *  the strongest integrity guarantee available without a build step). */
+const PDFJS_CDN = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.5.207/build';
+
+/**
+ * Fetch PDF bytes for the given URL.  Tries a direct fetch first (fast, works
+ * when the server sends CORS headers); falls back to the allorigins /raw
+ * proxy which returns the binary body without JSON wrapping.
+ * @param {string} url
+ * @returns {Promise<Uint8Array>}
+ */
+async function fetchPdfBytes(url) {
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return new Uint8Array(await resp.arrayBuffer());
+  } catch {
+    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+    const resp = await fetch(proxyUrl);
+    if (!resp.ok) throw new Error(`Proxy HTTP ${resp.status}`);
+    return new Uint8Array(await resp.arrayBuffer());
+  }
+}
+
+/**
+ * Load a PDF from the given URL, extract all text content with PDF.js, and
+ * return the total qual-match minutes detected (null if nothing found).
+ * @param {string} pdfUrl
+ * @returns {Promise<number|null>}
+ */
+async function parsePdfAgenda(pdfUrl) {
+  try {
+    const pdfjsLib = await import(`${PDFJS_CDN}/pdf.min.mjs`);
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `${PDFJS_CDN}/pdf.worker.min.mjs`;
+
+    const pdfBytes = await fetchPdfBytes(pdfUrl);
+    const doc = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
+
+    const allItems = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      allItems.push(...content.items);
+    }
+
+    const minutes = parsePdfText(allItems);
+    return minutes > 0 ? minutes : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Load the event agenda by following the TBA redirect:
  *   https://www.thebluealliance.com/event/<key>/agenda
@@ -47,6 +181,9 @@ async function proxiedFetch(url) {
  *   qualMinutes – detected qual-match duration in minutes (null if not found)
  *   source      – human-readable description of what was found
  *   agendaUrl   – the final URL the agenda redirected to
+ *
+ * When the redirect leads to a PDF the agenda is fetched and parsed with
+ * PDF.js to auto-detect the qual time block.
  *
  * Note: the TBA API key is intentionally included here because this is a
  * client-side SPA with no backend.  TBA API keys are public, rate-limited
@@ -71,9 +208,12 @@ export async function loadAgendaInfo(eventKey) {
 
   // ── 1. Did the proxy land on a PDF? ────────────────────────────────────
   if (contentType.includes('application/pdf') || /\.pdf(\?|#|$)/i.test(finalUrl)) {
+    const minutes = await parsePdfAgenda(finalUrl);
     return {
-      qualMinutes: null,
-      source: 'Agenda is a PDF — please enter qual time manually',
+      qualMinutes: minutes,
+      source: minutes
+        ? 'Parsed from PDF agenda'
+        : 'Agenda is a PDF — please enter qual time manually',
       agendaUrl: finalUrl,
     };
   }
@@ -81,9 +221,12 @@ export async function loadAgendaInfo(eventKey) {
   // ── 2. Is there a PDF link embedded in the page HTML? ───────────────────
   const pdfMatch = content.match(/https?:\/\/[^\s"'<>]+\.pdf(?:[?#][^\s"'<>]*)?/i);
   if (pdfMatch) {
+    const minutes = await parsePdfAgenda(pdfMatch[0]);
     return {
-      qualMinutes: null,
-      source: 'Agenda is a PDF — please enter qual time manually',
+      qualMinutes: minutes,
+      source: minutes
+        ? 'Parsed from PDF agenda'
+        : 'Agenda is a PDF — please enter qual time manually',
       agendaUrl: pdfMatch[0],
     };
   }
