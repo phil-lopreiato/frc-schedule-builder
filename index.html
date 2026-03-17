@@ -453,6 +453,20 @@ function stat(val, label, cls) {
     val + '</div><div class="stat-label">' + label + '</div></div>';
 }
 
+function distributeEvenly(totalMatches, blocks, cycleTime) {
+  const totalDur = blocks.reduce((s, b) => s + b.duration, 0);
+  // Floor-assign proportionally to block duration
+  const assignments = blocks.map(b => Math.floor(b.duration / totalDur * totalMatches));
+  let assigned = assignments.reduce((a, b) => a + b, 0);
+  // Distribute remaining matches to blocks with the largest fractional remainder
+  const fracs = blocks.map((b, i) => [i, b.duration / totalDur * totalMatches - assignments[i]]);
+  fracs.sort((a, b) => b[1] - a[1]);
+  for (let i = 0; assigned < totalMatches; i++, assigned++) {
+    assignments[fracs[i][0]]++;
+  }
+  return assignments;
+}
+
 function renderTimeline(totalMatches, cycleTime, totalAvail, fitClass) {
   const el = document.getElementById('timeline');
   if (state.blocks.length === 0) {
@@ -468,18 +482,30 @@ function renderTimeline(totalMatches, cycleTime, totalAvail, fitClass) {
     return;
   }
 
-  // Distribute matches across blocks.
-  // A match belongs to a block as long as it *starts* before the block ends,
-  // even if it runs a few minutes past the scheduled end time.
-  let matchesLeft = totalMatches;
-  let html = '';
+  const totalNeeded = totalMatches * cycleTime;
+  const hasBuffer = totalNeeded <= totalAvail;
 
-  for (const block of state.blocks) {
-    const matchesFit = Math.ceil(block.duration / cycleTime); // matches that START within this block
-    const used = Math.min(matchesFit, matchesLeft);
+  // Assign matches to blocks
+  let assignments;
+  if (hasBuffer) {
+    // Spread evenly so each block has roughly the same fill percentage
+    assignments = distributeEvenly(totalMatches, state.blocks, cycleTime);
+  } else {
+    // Over capacity: fill every block to its exact floor capacity,
+    // then pour all remaining matches into the second block (index 1)
+    // so Saturday/later blocks stay on their scheduled end times.
+    assignments = state.blocks.map(b => Math.floor(b.duration / cycleTime));
+    const assigned = assignments.reduce((a, b) => a + b, 0);
+    const overflowIdx = Math.min(1, state.blocks.length - 1);
+    assignments[overflowIdx] += totalMatches - assigned;
+  }
+
+  let html = '';
+  for (let bi = 0; bi < state.blocks.length; bi++) {
+    const block = state.blocks[bi];
+    const used = assignments[bi];
     const usedTime = used * cycleTime;
     const overage = Math.round(usedTime - block.duration); // >0 means last match runs past block end
-    matchesLeft -= used;
 
     const fillPct = block.duration > 0 ? Math.min(usedTime / block.duration * 100, 100) : 0;
 
@@ -502,13 +528,6 @@ function renderTimeline(totalMatches, cycleTime, totalAvail, fitClass) {
       '<div class="timeline-meta"><span>' + dayLabel + fmtTime(block.start) + '</span>' +
       '<span>' + block.duration + ' min scheduled</span>' +
       '<span>' + endDisplay + '</span></div>';
-  }
-
-  if (matchesLeft > 0) {
-    html += '<div style="margin-top:12px;padding:12px;background:rgba(239,68,68,0.1);' +
-      'border-radius:6px;color:var(--error);font-weight:600;font-size:0.9rem">' +
-      '⚠️ ' + matchesLeft + ' matches don\'t fit! Need ' +
-      Math.round(matchesLeft * cycleTime) + ' more minutes.</div>';
   }
 
   el.innerHTML = html;
