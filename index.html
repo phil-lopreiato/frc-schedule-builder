@@ -550,7 +550,9 @@ function renderTimeline(totalMatches, cycleTime, totalAvail, fitClass) {
 
     const endDisplay = overage > 0
       ? fmtTime(block.end) + ' <span style="color:var(--warning);font-weight:600">+' + overage + ' min</span>'
-      : fmtTime(block.end);
+      : overage < 0
+        ? fmtTime(block.end) + ' <span style="color:var(--success);font-weight:600">-' + Math.abs(overage) + ' min</span>'
+        : fmtTime(block.end);
 
     const dayLabel = block.day ? '<strong>' + block.day + '</strong> — ' : '';
     html += '<div class="timeline-meta"><span>' + dayLabel + fmtTime(block.start) + '</span>' +
