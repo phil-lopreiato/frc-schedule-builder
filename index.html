@@ -553,12 +553,12 @@ function renderTimeline(totalMatches, cycleTime, totalAvail, fitClass) {
       : fmtTime(block.end);
 
     const dayLabel = block.day ? '<strong>' + block.day + '</strong> — ' : '';
-    html += '<div class="timeline-bar" title="' + (block.day || '') + ' ' + fmtTime(block.start) + '-' + fmtTime(block.end) + '">' +
-      '<div class="timeline-fill" style="width:' + fillPct + '%;background:' + color + '">' +
-      blockLabel + '</div></div>' +
-      '<div class="timeline-meta"><span>' + dayLabel + fmtTime(block.start) + '</span>' +
+    html += '<div class="timeline-meta"><span>' + dayLabel + fmtTime(block.start) + '</span>' +
       '<span>' + block.duration + ' min scheduled</span>' +
-      '<span>' + endDisplay + '</span></div>';
+      '<span>' + endDisplay + '</span></div>' +
+      '<div class="timeline-bar" title="' + (block.day || '') + ' ' + fmtTime(block.start) + '-' + fmtTime(block.end) + '">' +
+      '<div class="timeline-fill" style="width:' + fillPct + '%;background:' + color + '">' +
+      blockLabel + '</div></div>';
   }
 
   el.innerHTML = html;
