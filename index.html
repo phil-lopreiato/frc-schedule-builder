@@ -468,36 +468,40 @@ function renderTimeline(totalMatches, cycleTime, totalAvail, fitClass) {
     return;
   }
 
-  // Distribute matches across blocks
+  // Distribute matches across blocks.
+  // A match belongs to a block as long as it *starts* before the block ends,
+  // even if it runs a few minutes past the scheduled end time.
   let matchesLeft = totalMatches;
   let html = '';
-  let dayTracker = '';
 
   for (const block of state.blocks) {
-    // Day grouping
-    const dayStr = block.start < 720 ? 'Morning' : 'Afternoon';
-    const matchesFit = Math.floor(block.duration / cycleTime);
+    const matchesFit = Math.ceil(block.duration / cycleTime); // matches that START within this block
     const used = Math.min(matchesFit, matchesLeft);
     const usedTime = used * cycleTime;
+    const overage = Math.round(usedTime - block.duration); // >0 means last match runs past block end
     matchesLeft -= used;
 
     const fillPct = block.duration > 0 ? Math.min(usedTime / block.duration * 100, 100) : 0;
-    const overPct = matchesLeft > 0 && used === matchesFit ? 100 : fillPct;
 
     let color;
-    if (matchesLeft > 0 && used === matchesFit) color = 'var(--accent)';
+    if (overage > 0) color = 'var(--warning)';
     else if (fillPct > 85) color = 'var(--warning)';
     else color = 'var(--success)';
 
-    const blockLabel = used + ' matches · ' + Math.round(usedTime) + '/' + block.duration + ' min';
+    let blockLabel = used + ' matches · ' + Math.round(usedTime) + ' min';
+    if (overage > 0) blockLabel += ' (+' + overage + ' min)';
+
+    const endDisplay = overage > 0
+      ? fmtTime(block.end) + ' <span style="color:var(--warning);font-weight:600">+' + overage + ' min</span>'
+      : fmtTime(block.end);
 
     const dayLabel = block.day ? '<strong>' + block.day + '</strong> — ' : '';
     html += '<div class="timeline-bar" title="' + (block.day || '') + ' ' + fmtTime(block.start) + '-' + fmtTime(block.end) + '">' +
       '<div class="timeline-fill" style="width:' + fillPct + '%;background:' + color + '">' +
       blockLabel + '</div></div>' +
       '<div class="timeline-meta"><span>' + dayLabel + fmtTime(block.start) + '</span>' +
-      '<span>' + block.duration + ' min available</span>' +
-      '<span>' + fmtTime(block.end) + '</span></div>';
+      '<span>' + block.duration + ' min scheduled</span>' +
+      '<span>' + endDisplay + '</span></div>';
   }
 
   if (matchesLeft > 0) {
