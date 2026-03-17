@@ -185,6 +185,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 </div>
 
 <script type="module">
+import { extractPDFText, parseQualBlocks } from './agenda-parser.mjs';
 const PDFJS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379';
 const TBA_KEY = 'OgkQlossATyHZij8FEAKl0opKiW63fDDSf7Fcwnr9jcJON5XwiGHgmCVZvjFb1Lv';
 
@@ -194,17 +195,6 @@ function setStatus(msg, cls) {
   const el = document.getElementById('status');
   el.textContent = msg;
   el.className = cls ? 'status-' + cls : '';
-}
-
-function parseTime12(s) {
-  // Parse "11:00AM" or "1:00PM" => minutes since midnight
-  s = s.trim().toUpperCase();
-  const m = s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/);
-  if (!m) return null;
-  let h = parseInt(m[1]), min = parseInt(m[2]), ap = m[3];
-  if (ap === 'PM' && h !== 12) h += 12;
-  if (ap === 'AM' && h === 12) h = 0;
-  return h * 60 + min;
 }
 
 function fmtTime(mins) {
@@ -263,80 +253,9 @@ async function fetchAgendaPDF(code) {
 }
 
 async function parsePDF(buf) {
-  // Load PDF.js
   const pdfjsLib = await import(PDFJS_CDN + '/pdf.min.mjs');
   pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_CDN + '/pdf.worker.min.mjs';
-
-  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-  let allText = '';
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const tc = await page.getTextContent();
-    // Group text items by Y position to reconstruct lines
-    const byY = {};
-    for (const item of tc.items) {
-      const y = Math.round(item.transform[5]); // Y coordinate
-      if (!byY[y]) byY[y] = [];
-      byY[y].push({ x: item.transform[4], str: item.str });
-    }
-    // Sort by Y descending (PDF coordinates: top = higher Y)
-    const sortedYs = Object.keys(byY).map(Number).sort((a, b) => b - a);
-    for (const y of sortedYs) {
-      const items = byY[y].sort((a, b) => a.x - b.x);
-      allText += items.map(it => it.str).join(' ').trim() + '\n';
-    }
-  }
-  // PDF.js 4.x sometimes inserts spaces between characters in time tokens
-  // (e.g. "8:5 0 AM" instead of "8:50AM"). Collapse those internal spaces.
-  allText = allText.replace(/\d[ \t]?\d?[ \t]*:[ \t]*\d[ \t]*\d[ \t]*[AaPp][ \t]*[Mm]/g, m => m.replace(/\s+/g, ''));
-  return allText;
-}
-
-function parseQualBlocks(text) {
-  const blocks = [];
-  const lines = text.replace(/\r/g, '').split('\n');
-  
-  // Day pattern: "Friday, March 20" or "Saturday, March 1, 2025"
-  const dayRe = /\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b\s*[,]?\s+(\w+\s+\d{1,2})/i;
-  const qualRe = /(\d{1,2}:\d{2}\s*[AaPp][Mm])\s*[-–—]\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])\s+Qualification\s+Match/i;
-  
-  let currentDay = '';
-  let blockNum = 0;
-  
-  // PDF.js may join items with spaces — also scan the joined text per-page
-  // But first try line-by-line
-  for (const line of lines) {
-    const dayMatch = dayRe.exec(line);
-    if (dayMatch) {
-      currentDay = dayMatch[1].substring(0, 3) + ' ' + dayMatch[2]; // "Fri March 20"
-    }
-    const qualMatch = qualRe.exec(line);
-    if (qualMatch) {
-      const start = parseTime12(qualMatch[1]);
-      const end = parseTime12(qualMatch[2]);
-      if (start !== null && end !== null && end > start) {
-        blockNum++;
-        blocks.push({ start, end, duration: end - start, startStr: qualMatch[1].trim(), endStr: qualMatch[2].trim(), day: currentDay || ('Block ' + blockNum) });
-      }
-    }
-  }
-  
-  // Fallback: if line-by-line found nothing, try on joined text (handles PDF.js concatenation)
-  if (blocks.length === 0) {
-    const fullText = text.replace(/\n/g, ' ');
-    const reG = /(\d{1,2}:\d{2}\s*[AaPp][Mm])\s*[-–—]\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])\s+Qualification\s+Match/gi;
-    let m;
-    while ((m = reG.exec(fullText)) !== null) {
-      const start = parseTime12(m[1]);
-      const end = parseTime12(m[2]);
-      blockNum++;
-      if (start !== null && end !== null && end > start) {
-        blocks.push({ start, end, duration: end - start, startStr: m[1].trim(), endStr: m[2].trim(), day: 'Block ' + blockNum });
-      }
-    }
-  }
-  
-  return blocks;
+  return extractPDFText(pdfjsLib, buf);
 }
 
 window.loadEvent = async function() {
@@ -383,7 +302,8 @@ window.loadEvent = async function() {
       const pdfBuf = await fetchAgendaPDF(code);
       setStatus('Parsing PDF...', 'loading');
       const text = await parsePDF(pdfBuf);
-      blocks = parseQualBlocks(text);
+      const districtKey = info?.district?.abbreviation?.toLowerCase() ?? '';
+      blocks = parseQualBlocks(text, { districtKey });
       if (blocks.length === 0) {
         setStatus('PDF loaded but no "Qualification Matches" time blocks found. You can enter blocks manually.', 'error');
       }
