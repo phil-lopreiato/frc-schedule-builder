@@ -99,6 +99,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .event-header { margin-bottom: 16px; }
 .event-name { font-size: 1.1rem; font-weight: 600; }
 .event-detail { font-size: 0.85rem; color: var(--muted); }
+.agenda-link { display: inline-block; margin-top: 4px; font-size: 0.8rem; }
 .hidden { display: none !important; }
 #results { transition: opacity 0.2s ease; }
 .typeahead-wrap { position: relative; }
@@ -151,6 +152,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
       <div class="event-header">
         <div class="event-name" id="eventName"></div>
         <div class="event-detail" id="eventDetail"></div>
+        <a id="agendaLink" href="#" target="_blank" rel="noopener" class="hidden agenda-link">View agenda PDF ↗</a>
       </div>
 
       <h2>Agenda — Qual Match Blocks</h2>
@@ -237,14 +239,14 @@ async function fetchAgendaPDF(code) {
       if (r.ok) {
         const ct = r.headers.get('content-type') || '';
         if (ct.includes('pdf') || url.endsWith('.pdf')) {
-          return await r.arrayBuffer();
+          return { buf: await r.arrayBuffer(), url };
         }
         // If HTML, check for redirect meta/link
         const text = await r.text();
         const redir = text.match(/url=([^"\s>]+\.pdf)/i);
         if (redir) {
           const r2 = await fetch(redir[1]);
-          if (r2.ok) return await r2.arrayBuffer();
+          if (r2.ok) return { buf: await r2.arrayBuffer(), url: redir[1] };
         }
       }
     } catch(e) { /* try next */ }
@@ -278,6 +280,7 @@ window.loadEvent = async function() {
   btn.textContent = 'Loading...';
   setStatus('Fetching event data...', 'loading');
   document.getElementById('results').classList.add('hidden');
+  document.getElementById('agendaLink').classList.add('hidden');
 
   try {
     // Fetch teams and event info in parallel, PDF separately
@@ -291,6 +294,11 @@ window.loadEvent = async function() {
     state.eventName = info ? info.name : code;
     const loc = info ? (info.city + ', ' + info.state_prov) : '';
 
+    // District events (type 1 = District, 2 = District Championship, 5 = District CMP Division)
+    // typically run 12 qual matches per team; regionals run 10.
+    const isDistrict = info && (info.event_type === 1 || info.event_type === 2 || info.event_type === 5);
+    document.getElementById('matchesPerTeam').value = isDistrict ? 12 : 10;
+
     document.getElementById('eventName').textContent = state.eventName;
     document.getElementById('eventDetail').textContent =
       state.teams + ' teams' + (loc ? ' · ' + loc : '');
@@ -299,7 +307,10 @@ window.loadEvent = async function() {
 
     let blocks = [];
     try {
-      const pdfBuf = await fetchAgendaPDF(code);
+      const { buf: pdfBuf, url: pdfUrl } = await fetchAgendaPDF(code);
+      state.pdfUrl = pdfUrl;
+      document.getElementById('agendaLink').href = pdfUrl;
+      document.getElementById('agendaLink').classList.remove('hidden');
       setStatus('Parsing PDF...', 'loading');
       const text = await parsePDF(pdfBuf);
       const districtKey = info?.district?.abbreviation?.toLowerCase() ?? '';
@@ -505,7 +516,7 @@ function showTypeahead(query) {
   if (!query || query.length < 2 || !searchIndex) { hideTypeahead(); return; }
   const q = query.toLowerCase();
   const matches = searchIndex
-    .filter(e => e.key.includes(q) || e.name.toLowerCase().includes(q))
+    .filter(e => e.key.startsWith('2026') && (e.key.includes(q) || e.name.toLowerCase().includes(q)))
     .sort((a, b) => b.key.localeCompare(a.key))
     .slice(0, 12);
   if (!matches.length) { hideTypeahead(); return; }
