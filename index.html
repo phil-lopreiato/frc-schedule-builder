@@ -268,7 +268,7 @@ async function parsePDF(buf) {
   }
   // PDF.js 4.x sometimes inserts spaces between characters in time tokens
   // (e.g. "8:5 0 AM" instead of "8:50AM"). Collapse those internal spaces.
-  allText = allText.replace(/\d{1,2}\s*:\s*\d\s*\d\s*[AaPp]\s*[Mm]/g, m => m.replace(/\s+/g, ''));
+  allText = allText.replace(/\d\s*\d?\s*:\s*\d\s*\d\s*[AaPp]\s*[Mm]/g, m => m.replace(/\s+/g, ''));
   return allText;
 }
 
