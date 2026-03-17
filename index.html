@@ -101,6 +101,23 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .event-detail { font-size: 0.85rem; color: var(--muted); }
 .hidden { display: none !important; }
 #results { transition: opacity 0.2s ease; }
+.typeahead-wrap { position: relative; }
+.typeahead-dropdown {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 100;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; margin-top: 2px;
+  max-height: 260px; overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+.typeahead-item {
+  padding: 8px 12px; cursor: pointer; font-size: 0.875rem;
+  display: flex; gap: 10px; align-items: baseline;
+  border-bottom: 1px solid var(--border);
+}
+.typeahead-item:last-child { border-bottom: none; }
+.typeahead-item:hover, .typeahead-item.active { background: rgba(59,130,246,0.1); }
+.typeahead-key { font-weight: 600; color: var(--accent); font-size: 0.8rem; white-space: nowrap; }
+.typeahead-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 640px) {
   .input-row { flex-direction: column; }
   .field { width: 100%; }
@@ -119,7 +136,10 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     <div class="input-row">
       <div class="field" style="flex:2;min-width:160px">
         <label>Event Code</label>
-        <input id="eventCode" type="text" placeholder="e.g. 2024miket" spellcheck="false">
+        <div class="typeahead-wrap">
+          <input id="eventCode" type="text" placeholder="Event code or name…" spellcheck="false" autocomplete="off">
+          <div id="typeaheadDropdown" class="typeahead-dropdown hidden"></div>
+        </div>
       </div>
       <button id="loadBtn" onclick="loadEvent()">Load Event</button>
     </div>
@@ -320,8 +340,19 @@ function parseQualBlocks(text) {
 }
 
 window.loadEvent = async function() {
-  const code = document.getElementById('eventCode').value.trim().toLowerCase();
-  if (!code) { setStatus('Enter an event code', 'error'); return; }
+  const raw = document.getElementById('eventCode').value.trim().toLowerCase();
+  hideTypeahead();
+  if (!raw) { setStatus('Enter an event code or name', 'error'); return; }
+
+  // If the user typed a display name (not a key), resolve it to the key
+  let code = raw;
+  if (searchIndex) {
+    const byName = searchIndex.find(e => e.name.toLowerCase() === raw);
+    if (byName) {
+      code = byName.key;
+      document.getElementById('eventCode').value = code;
+    }
+  }
 
   const btn = document.getElementById('loadBtn');
   btn.disabled = true;
@@ -533,10 +564,94 @@ function renderTimeline(totalMatches, cycleTime, totalAvail, fitClass) {
   el.innerHTML = html;
 }
 
-// Enter key triggers load
-document.getElementById('eventCode').addEventListener('keydown', e => {
-  if (e.key === 'Enter') loadEvent();
+// Typeahead
+let searchIndex = null;
+let taActive = -1;
+
+async function ensureSearchIndex() {
+  if (searchIndex !== null) return;
+  try {
+    const r = await fetch('https://www.thebluealliance.com/api/v3/search_index',
+      { headers: { 'X-TBA-Auth-Key': TBA_KEY } });
+    const data = await r.json();
+    searchIndex = data.events || [];
+  } catch(e) { searchIndex = []; }
+}
+
+function showTypeahead(query) {
+  const dd = document.getElementById('typeaheadDropdown');
+  if (!query || query.length < 2 || !searchIndex) { hideTypeahead(); return; }
+  const q = query.toLowerCase();
+  const matches = searchIndex
+    .filter(e => e.key.includes(q) || e.name.toLowerCase().includes(q))
+    .sort((a, b) => b.key.localeCompare(a.key))
+    .slice(0, 12);
+  if (!matches.length) { hideTypeahead(); return; }
+  taActive = -1;
+  dd.innerHTML = matches.map(e =>
+    '<div class="typeahead-item" data-key="' + e.key + '" onmousedown="selectTypeahead(\'' + e.key + '\')">' +
+    '<span class="typeahead-key">' + e.key + '</span>' +
+    '<span class="typeahead-name">' + e.name + '</span></div>'
+  ).join('');
+  dd.classList.remove('hidden');
+}
+
+function hideTypeahead() {
+  document.getElementById('typeaheadDropdown').classList.add('hidden');
+  taActive = -1;
+}
+
+window.selectTypeahead = function(key) {
+  document.getElementById('eventCode').value = key;
+  hideTypeahead();
+};
+
+function taUpdateActive(items) {
+  items.forEach((el, i) => el.classList.toggle('active', i === taActive));
+  if (taActive >= 0) items[taActive].scrollIntoView({ block: 'nearest' });
+}
+
+const _input = document.getElementById('eventCode');
+
+_input.addEventListener('focus', async () => {
+  await ensureSearchIndex();
+  showTypeahead(_input.value.trim());
 });
+
+_input.addEventListener('input', async () => {
+  await ensureSearchIndex();
+  showTypeahead(_input.value.trim());
+});
+
+_input.addEventListener('blur', () => setTimeout(hideTypeahead, 150));
+
+_input.addEventListener('keydown', e => {
+  const dd = document.getElementById('typeaheadDropdown');
+  const isOpen = !dd.classList.contains('hidden');
+  const items = dd.querySelectorAll('.typeahead-item');
+  if (e.key === 'ArrowDown' && isOpen) {
+    e.preventDefault();
+    taActive = Math.min(taActive + 1, items.length - 1);
+    taUpdateActive(items);
+  } else if (e.key === 'ArrowUp' && isOpen) {
+    e.preventDefault();
+    taActive = Math.max(taActive - 1, -1);
+    taUpdateActive(items);
+  } else if (e.key === 'Escape') {
+    hideTypeahead();
+  } else if (e.key === 'Enter') {
+    if (isOpen && taActive >= 0) {
+      e.preventDefault();
+      selectTypeahead(items[taActive].dataset.key);
+    } else {
+      hideTypeahead();
+      loadEvent();
+    }
+  }
+});
+
+// Pre-fetch search index in the background
+ensureSearchIndex();
 
 // Auto-load from URL hash
 if (location.hash) {
