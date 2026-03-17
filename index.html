@@ -266,6 +266,9 @@ async function parsePDF(buf) {
       allText += items.map(it => it.str).join(' ').trim() + '\n';
     }
   }
+  // PDF.js 4.x sometimes inserts spaces between characters in time tokens
+  // (e.g. "8:5 0 AM" instead of "8:50AM"). Collapse those internal spaces.
+  allText = allText.replace(/\d{1,2}\s*:\s*\d\s*\d\s*[AaPp]\s*[Mm]/g, m => m.replace(/\s+/g, ''));
   return allText;
 }
 
@@ -274,7 +277,7 @@ function parseQualBlocks(text) {
   const lines = text.replace(/\r/g, '').split('\n');
   
   // Day pattern: "Friday, March 20" or "Saturday, March 1, 2025"
-  const dayRe = /\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b[,]?\s+(\w+\s+\d{1,2})/i;
+  const dayRe = /\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b\s*[,]?\s+(\w+\s+\d{1,2})/i;
   const qualRe = /(\d{1,2}:\d{2}\s*[AaPp][Mm])\s*[-–—]\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])\s+Qualification\s+Match/i;
   
   let currentDay = '';
