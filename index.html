@@ -87,11 +87,29 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .block-item {
   display: flex; justify-content: space-between; align-items: center;
   padding: 8px 12px; border-bottom: 1px solid var(--border);
-  font-size: 0.875rem;
+  font-size: 0.875rem; gap: 12px;
 }
 .block-item:last-child { border-bottom: none; }
-.block-time { font-weight: 500; }
-.block-dur { color: var(--muted); font-size: 0.8rem; }
+.block-time { font-weight: 500; flex: 1; }
+.block-dur { color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
+.round-list { margin-top: 8px; }
+.round-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 0.875rem;
+}
+.round-item:last-child { border-bottom: none; }
+.round-label { font-weight: 500; min-width: 60px; }
+.round-matches { color: var(--muted); font-size: 0.8rem; flex: 1; }
+.round-cycle { display: flex; align-items: center; gap: 4px; white-space: nowrap; color: var(--muted); font-size: 0.8rem; }
+.round-cycle input { width: 52px; height: 26px; padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text); font-size: 0.8rem; }
+details.card { cursor: default; }
+details.card > summary {
+  list-style: none; cursor: pointer; font-size: 1.25rem; font-weight: 600;
+  display: flex; align-items: center; gap: 8px; user-select: none;
+}
+details.card > summary::before { content: '▶'; font-size: 0.65rem; color: var(--muted); transition: transform 0.15s; }
+details.card[open] > summary::before { transform: rotate(90deg); }
+details.card > summary::-webkit-details-marker { display: none; }
 #status { margin: 12px 0; font-size: 0.875rem; }
 .status-loading { color: var(--accent); }
 .status-error { color: var(--error); }
@@ -169,10 +187,16 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
         </div>
         <div class="field" style="flex:1">
           <label>Cycle Time (min)</label>
-          <input id="cycleTime" type="number" value="8" min="2" max="15" step="0.5" onchange="recalc()" oninput="recalc()">
+          <input id="cycleTime" type="number" value="8" min="2" max="15" step="0.5" onchange="updateAllCycleTimes()" oninput="updateAllCycleTimes()">
         </div>
       </div>
     </div>
+
+    <details class="card hidden" id="roundListWrap">
+      <summary>Per Round Timing</summary>
+      <div id="roundListSubheader" style="font-size:0.8rem;color:var(--muted);margin:10px 0 4px;"></div>
+      <div class="round-list" id="roundList"></div>
+    </details>
 
     <div class="card">
       <h2>Schedule Fit</h2>
@@ -192,6 +216,50 @@ const PDFJS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379';
 const TBA_KEY = 'OgkQlossATyHZij8FEAKl0opKiW63fDDSf7Fcwnr9jcJON5XwiGHgmCVZvjFb1Lv';
 
 let state = { teams: 0, blocks: [], eventName: '' };
+let lastRenderedMpt = -1;
+let prevDefaultCt = 8;
+
+function maybeRenderRounds(mpt, defaultCt, totalMatches) {
+  if (mpt === lastRenderedMpt) return;
+  lastRenderedMpt = mpt;
+  renderRounds(mpt, defaultCt, totalMatches);
+}
+
+function renderRounds(mpt, defaultCt, totalMatches) {
+  const wrap = document.getElementById('roundListWrap');
+  const el = document.getElementById('roundList');
+  if (!el) return;
+  if (mpt < 1) { wrap.classList.add('hidden'); return; }
+  wrap.classList.remove('hidden');
+  prevDefaultCt = defaultCt;
+
+  // Subheader: show match count per round
+  const sub = document.getElementById('roundListSubheader');
+  if (sub && totalMatches) {
+    const lo = Math.floor(totalMatches / mpt), hi = Math.ceil(totalMatches / mpt);
+    const countStr = lo === hi ? lo + ' matches each' : lo + '–' + hi + ' matches each';
+    sub.textContent = 'Cycle time per round (' + countStr + ')';
+  }
+
+  let h = '';
+  for (let i = 0; i < mpt; i++) {
+    const existing = document.getElementById('cycletime-round-' + i);
+    const val = existing ? existing.value : defaultCt;
+    // Match range for this round (1-indexed)
+    const firstMatch = totalMatches ? Math.floor(i * totalMatches / mpt) + 1 : '?';
+    const lastMatch  = totalMatches ? Math.floor((i + 1) * totalMatches / mpt) : '?';
+    const matchRange = firstMatch === lastMatch ? 'Match ' + firstMatch : 'Matches ' + firstMatch + '–' + lastMatch;
+    h += '<div class="round-item">' +
+      '<span class="round-label">Round ' + (i + 1) + '</span>' +
+      '<span class="round-matches">(' + matchRange + ')</span>' +
+      '<label class="round-cycle">' +
+        '<input id="cycletime-round-' + i + '" type="number" value="' + val + '" ' +
+        'min="2" max="15" step="0.5" onchange="recalc()" oninput="recalc()"> min' +
+      '</label>' +
+    '</div>';
+  }
+  el.innerHTML = h;
+}
 
 function setStatus(msg, cls) {
   const el = document.getElementById('status');
@@ -349,57 +417,84 @@ function renderBlocks() {
     return;
   }
   let h = '';
-  for (const b of state.blocks) {
+  for (let i = 0; i < state.blocks.length; i++) {
+    const b = state.blocks[i];
+    const blockLabel = 'Block ' + (i + 1);
     h += '<div class="block-item">' +
-      '<span class="block-time">' + (b.day ? '<strong>' + b.day + '</strong> ' : '') + fmtTime(b.start) + ' – ' + fmtTime(b.end) + '</span>' +
-      '<span class="block-dur">' + b.duration + ' min</span></div>';
+      '<span class="block-time"><strong>' + blockLabel + '</strong>' +
+        (b.day ? ' · ' + b.day : '') +
+        ' &nbsp; ' + fmtTime(b.start) + ' – ' + fmtTime(b.end) + '</span>' +
+      '<span class="block-dur">' + b.duration + ' min</span>' +
+      '</div>';
   }
   el.innerHTML = h;
 }
 
 window.recalc = function() {
-  if (state.blocks.length === 0) return;
-
   const mpt = parseInt(document.getElementById('matchesPerTeam').value) || 10;
-  const ct = parseFloat(document.getElementById('cycleTime').value) || 7;
+  const defaultCt = parseFloat(document.getElementById('cycleTime').value) || 8;
   const numTeams = parseInt(document.getElementById('teamCount').value) || state.teams;
   if (numTeams === 0) return;
 
-  // Total match slots needed
   const totalSlots = numTeams * mpt;
-  const teamsPerMatch = 6; // 3v3
+  const teamsPerMatch = 6;
   const totalMatches = Math.ceil(totalSlots / teamsPerMatch);
   const surrogates = (totalMatches * teamsPerMatch) - totalSlots;
 
-  // Time
-  const timeNeeded = totalMatches * ct;
-  let availableMin = 0;
-  if (state.blocks.length > 0) {
-    availableMin = state.blocks.reduce((s, b) => s + b.duration, 0);
-  } else {
-    const manEl = document.getElementById('manualMinutes');
-    availableMin = manEl ? parseInt(manEl.value) || 360 : 360;
+  maybeRenderRounds(mpt, defaultCt, totalMatches);
+
+  // Per-round cycle times (array of length mpt)
+  const cycleTimes = Array.from({length: mpt}, (_, i) => {
+    const el = document.getElementById('cycletime-round-' + i);
+    return el ? (parseFloat(el.value) || defaultCt) : defaultCt;
+  });
+
+  // Total time: sum cycle time for each match, where match m → round floor(m*mpt/totalMatches)
+  let actualTimeNeeded = 0;
+  for (let m = 0; m < totalMatches; m++) {
+    actualTimeNeeded += cycleTimes[Math.min(Math.floor(m * mpt / totalMatches), mpt - 1)];
   }
 
-  const surplus = availableMin - timeNeeded;
-  const pct = availableMin > 0 ? (timeNeeded / availableMin * 100) : 100;
-  const mpr = ct > 0 ? (60 / ct) : 0;
+  let availableMin;
+  let assignments; // match count per block
+
+  if (state.blocks.length === 0) {
+    const manEl = document.getElementById('manualMinutes');
+    availableMin = manEl ? parseInt(manEl.value) || 360 : 360;
+    assignments = [totalMatches];
+  } else {
+    availableMin = state.blocks.reduce((s, b) => s + b.duration, 0);
+
+    if (actualTimeNeeded <= availableMin) {
+      assignments = distributeMatches(totalMatches, state.blocks);
+    } else {
+      // Overflow: fill each block to floor capacity by avg cycle time, overflow to block[1]
+      const avgCt = actualTimeNeeded / totalMatches;
+      assignments = state.blocks.map(b => Math.floor(b.duration / avgCt));
+      const totalCap = assignments.reduce((a, b) => a + b, 0);
+      if (totalCap < totalMatches) {
+        assignments[Math.min(1, state.blocks.length - 1)] += totalMatches - totalCap;
+      }
+    }
+  }
+
+  const surplus = availableMin - actualTimeNeeded;
+  const pct = availableMin > 0 ? (actualTimeNeeded / availableMin * 100) : 100;
+  const avgCt = totalMatches > 0 ? actualTimeNeeded / totalMatches : defaultCt;
+  const mpr = avgCt > 0 ? (60 / avgCt) : 0;
+  const reqCycle = availableMin > 0 && totalMatches > 0 ? (availableMin / totalMatches) : 0;
 
   let fitClass, fitLabel;
-  if (pct <= 85) { fitClass = 'fit'; fitLabel = 'Comfortable'; }
+  if (pct <= 85)       { fitClass = 'fit';   fitLabel = 'Comfortable'; }
   else if (pct <= 100) { fitClass = 'tight'; fitLabel = 'Tight'; }
-  else { fitClass = 'over'; fitLabel = 'Over Capacity'; }
+  else                 { fitClass = 'over';  fitLabel = 'Over Capacity'; }
 
-  // Required cycle time to fit
-  const reqCycle = availableMin > 0 ? (availableMin / totalMatches) : 0;
-
-  // Render stats
   const sg = document.getElementById('statsGrid');
   sg.innerHTML =
     stat(totalMatches, 'Total Matches') +
     stat(surrogates, 'Surrogates') +
     stat(mpr.toFixed(1), 'Matches / Hour') +
-    stat(Math.round(timeNeeded) + ' min', 'Time Needed') +
+    stat(Math.round(actualTimeNeeded) + ' min', 'Time Needed') +
     stat(availableMin + ' min', 'Time Available') +
     stat((surplus >= 0 ? '+' : '') + Math.round(surplus) + ' min',
       surplus >= 0 ? 'Buffer' : 'Overflow', fitClass) +
@@ -407,7 +502,19 @@ window.recalc = function() {
     stat(fitLabel, 'Status', fitClass) +
     stat(reqCycle.toFixed(1) + ' min', 'Max Cycle to Fit');
 
-  renderTimeline(totalMatches, ct, availableMin, fitClass);
+  renderTimeline(assignments, cycleTimes, totalMatches, mpt, availableMin, fitClass);
+};
+
+window.updateAllCycleTimes = function() {
+  const newCt = parseFloat(document.getElementById('cycleTime').value) || 8;
+  const mpt = parseInt(document.getElementById('matchesPerTeam').value) || 10;
+  // Update per-round inputs that still match the previous default (haven't been customized)
+  for (let i = 0; i < mpt; i++) {
+    const el = document.getElementById('cycletime-round-' + i);
+    if (el && Math.abs(parseFloat(el.value) - prevDefaultCt) < 0.001) el.value = newCt;
+  }
+  prevDefaultCt = newCt;
+  recalc();
 };
 
 function stat(val, label, cls) {
@@ -415,83 +522,92 @@ function stat(val, label, cls) {
     val + '</div><div class="stat-label">' + label + '</div></div>';
 }
 
-function distributeEvenly(totalMatches, blocks, cycleTime) {
+function distributeMatches(totalMatches, blocks) {
+  // Proportional to block duration, whole-match granularity
   const totalDur = blocks.reduce((s, b) => s + b.duration, 0);
-  // Floor-assign proportionally to block duration
-  const assignments = blocks.map(b => Math.floor(b.duration / totalDur * totalMatches));
-  let assigned = assignments.reduce((a, b) => a + b, 0);
-  // Distribute remaining matches to blocks with the largest fractional remainder
-  const fracs = blocks.map((b, i) => [i, b.duration / totalDur * totalMatches - assignments[i]]);
+  const counts = blocks.map(b => Math.floor(b.duration / totalDur * totalMatches));
+  let assigned = counts.reduce((a, b) => a + b, 0);
+  const fracs = blocks.map((b, i) => [i, b.duration / totalDur * totalMatches - counts[i]]);
   fracs.sort((a, b) => b[1] - a[1]);
-  for (let i = 0; assigned < totalMatches; i++, assigned++) {
-    assignments[fracs[i][0]]++;
-  }
-  return assignments;
+  for (let i = 0; assigned < totalMatches; i++, assigned++) counts[fracs[i][0]]++;
+  return counts;
 }
 
-function renderTimeline(totalMatches, cycleTime, totalAvail, fitClass) {
+function renderTimeline(assignments, cycleTimes, totalMatches, mpt, totalAvail, fitClass) {
   const el = document.getElementById('timeline');
+  const defaultColor = fitClass === 'fit' ? 'var(--success)' :
+                       fitClass === 'tight' ? 'var(--warning)' : 'var(--error)';
+
+  // Helper: cycle time for match index m (0-based)
+  function ctForMatch(m) {
+    return cycleTimes[Math.min(Math.floor(m * mpt / totalMatches), mpt - 1)] || 8;
+  }
+
   if (state.blocks.length === 0) {
-    // Simple single bar
-    const pct = Math.min((totalMatches * cycleTime) / totalAvail * 100, 120);
-    const color = fitClass === 'fit' ? 'var(--success)' :
-                  fitClass === 'tight' ? 'var(--warning)' : 'var(--error)';
+    const count = assignments[0] || 0;
+    let time = 0;
+    for (let m = 0; m < count; m++) time += ctForMatch(m);
+    const pct = Math.min(time / totalAvail * 100, 100);
     el.innerHTML =
       '<div class="timeline-bar">' +
-      '<div class="timeline-fill" style="width:' + Math.min(pct,100) + '%;background:' + color + '">' +
-      totalMatches + ' matches (' + Math.round(totalMatches * cycleTime) + ' min)</div></div>' +
+      '<div class="timeline-fill" style="width:' + pct + '%;background:' + defaultColor + '">' +
+      count + ' matches · ' + Math.round(time) + ' min</div></div>' +
       '<div class="timeline-meta"><span>0 min</span><span>' + totalAvail + ' min</span></div>';
     return;
   }
 
-  const totalNeeded = totalMatches * cycleTime;
-  const hasBuffer = totalNeeded <= totalAvail;
-
-  // Assign matches to blocks
-  let assignments;
-  if (hasBuffer) {
-    // Spread evenly so each block has roughly the same fill percentage
-    assignments = distributeEvenly(totalMatches, state.blocks, cycleTime);
-  } else {
-    // Over capacity: fill every block to its exact floor capacity,
-    // then pour all remaining matches into the second block (index 1)
-    // so Saturday/later blocks stay on their scheduled end times.
-    assignments = state.blocks.map(b => Math.floor(b.duration / cycleTime));
-    const assigned = assignments.reduce((a, b) => a + b, 0);
-    const overflowIdx = Math.min(1, state.blocks.length - 1);
-    assignments[overflowIdx] += totalMatches - assigned;
-  }
-
   let html = '';
+  let matchStart = 0;
   for (let bi = 0; bi < state.blocks.length; bi++) {
     const block = state.blocks[bi];
-    const used = assignments[bi];
-    const usedTime = used * cycleTime;
-    const overage = Math.round(usedTime - block.duration); // >0 means last match runs past block end
+    const count = assignments[bi] || 0;
 
-    const fillPct = block.duration > 0 ? Math.min(usedTime / block.duration * 100, 100) : 0;
+    // Time for this block using per-match cycle times
+    let usedTime = 0;
+    for (let m = matchStart; m < matchStart + count; m++) usedTime += ctForMatch(m);
+
+    // Which rounds span this block?
+    let roundRange = 'No matches';
+    if (count > 0 && totalMatches > 0) {
+      const firstR = Math.min(Math.floor(matchStart * mpt / totalMatches), mpt - 1);
+      const lastR  = Math.min(Math.floor((matchStart + count - 1) * mpt / totalMatches), mpt - 1);
+      roundRange = firstR === lastR
+        ? 'Round ' + (firstR + 1)
+        : 'Rounds ' + (firstR + 1) + '–' + (lastR + 1);
+    }
+
+    const overage  = Math.round(usedTime - block.duration);
+    const fillPct  = block.duration > 0 ? Math.min(usedTime / block.duration * 100, 100) : 0;
 
     let color;
-    if (overage > 0) color = 'var(--warning)';
+    if (overage > 0)       color = 'var(--warning)';
     else if (fillPct > 85) color = 'var(--warning)';
-    else color = 'var(--success)';
-
-    let blockLabel = used + ' matches · ' + Math.round(usedTime) + ' min';
-    if (overage > 0) blockLabel += ' (+' + overage + ' min)';
+    else                   color = 'var(--success)';
 
     const endDisplay = overage > 0
       ? fmtTime(block.end) + ' <span style="color:var(--warning);font-weight:600">+' + overage + ' min</span>'
       : overage < 0
-        ? fmtTime(block.end) + ' <span style="color:var(--success);font-weight:600">-' + Math.abs(overage) + ' min</span>'
+        ? fmtTime(block.end) + ' <span style="color:var(--success);font-weight:600">−' + Math.abs(overage) + ' min</span>'
         : fmtTime(block.end);
 
-    const dayLabel = block.day ? '<strong>' + block.day + '</strong> — ' : '';
-    html += '<div class="timeline-meta"><span>' + dayLabel + fmtTime(block.start) + '</span>' +
-      '<span>' + block.duration + ' min scheduled</span>' +
-      '<span>' + endDisplay + '</span></div>' +
-      '<div class="timeline-bar" title="' + (block.day || '') + ' ' + fmtTime(block.start) + '-' + fmtTime(block.end) + '">' +
-      '<div class="timeline-fill" style="width:' + fillPct + '%;background:' + color + '">' +
-      blockLabel + '</div></div>';
+    const blockLabel = '<strong>Block ' + (bi + 1) + (block.day ? ' · ' + block.day : '') + '</strong>';
+    const annotation = roundRange + ' &nbsp;·&nbsp; ' + count + ' matches · ' + Math.round(usedTime) + ' min'
+      + (overage > 0 ? ' <span style="color:var(--warning)">+' + overage + ' min over</span>'
+         : overage < 0 ? ' <span style="color:var(--success)">· ' + Math.abs(overage) + ' min buffer</span>'
+         : '');
+
+    html +=
+      '<div class="timeline-meta">' +
+        '<span>' + blockLabel + ' &nbsp; ' + fmtTime(block.start) + '</span>' +
+        '<span>' + block.duration + ' min scheduled</span>' +
+        '<span>' + endDisplay + '</span>' +
+      '</div>' +
+      '<div class="timeline-bar" title="Block ' + (bi+1) + ' ' + fmtTime(block.start) + '–' + fmtTime(block.end) + '">' +
+        '<div class="timeline-fill" style="width:' + fillPct + '%;background:' + color + '"></div>' +
+      '</div>' +
+      '<div style="font-size:0.78rem;color:var(--muted);padding:2px 4px 10px;">' + annotation + '</div>';
+
+    matchStart += count;
   }
 
   el.innerHTML = html;
