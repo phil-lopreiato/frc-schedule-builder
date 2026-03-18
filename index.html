@@ -85,13 +85,20 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 .block-list { margin: 12px 0; }
 .block-item {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 8px 12px; border-bottom: 1px solid var(--border);
-  font-size: 0.875rem; gap: 12px;
+  display: flex; align-items: center;
+  padding: 6px 12px; border-bottom: 1px solid var(--border);
+  font-size: 0.875rem; gap: 8px; flex-wrap: wrap;
 }
 .block-item:last-child { border-bottom: none; }
-.block-time { font-weight: 500; flex: 1; }
-.block-dur { color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
+.block-label { font-weight: 600; white-space: nowrap; min-width: 54px; }
+.block-dur { color: var(--muted); font-size: 0.8rem; white-space: nowrap; margin-left: auto; }
+.block-edit { height: 28px; padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text); font-size: 0.8rem; }
+input.block-edit-day  { width: 72px; }
+input.block-edit-time { width: 110px; }
+.btn-icon { height: 26px; width: 26px; padding: 0; background: none; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer; }
+.btn-icon:hover { color: var(--error); border-color: var(--error); filter: none; }
+.btn-add { height: 30px; padding: 0 12px; background: none; border: 1px dashed var(--border); border-radius: 5px; color: var(--muted); font-weight: 500; font-size: 0.8rem; margin: 6px 12px; cursor: pointer; }
+.btn-add:hover { border-color: var(--accent); color: var(--accent); filter: none; }
 .round-list { margin-top: 8px; }
 .round-item {
   display: flex; align-items: center; gap: 10px;
@@ -404,31 +411,81 @@ window.loadEvent = async function() {
   }
 };
 
+function minsToTime(m) {
+  return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+}
+
+function timeToMins(t) {
+  if (!t) return NaN;
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+}
+
 function renderBlocks() {
   const el = document.getElementById('blockList');
+  let h = '';
   if (state.blocks.length === 0) {
-    el.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:0.85rem">' +
+    h += '<div style="padding:12px;color:var(--muted);font-size:0.85rem">' +
       'No qual blocks parsed. Enter a manual override:' +
       '<div style="margin-top:8px"><label style="font-size:0.8rem;font-weight:500">Total Available Minutes</label>' +
       '<input id="manualMinutes" type="number" value="360" min="1" ' +
       'style="height:36px;padding:0 10px;border:1px solid var(--border);border-radius:6px;' +
       'background:var(--surface);color:var(--text);font-size:0.9rem;width:120px;margin-left:8px" ' +
       'onchange="recalc()" oninput="recalc()"></div></div>';
-    return;
   }
-  let h = '';
   for (let i = 0; i < state.blocks.length; i++) {
     const b = state.blocks[i];
-    const blockLabel = 'Block ' + (i + 1);
     h += '<div class="block-item">' +
-      '<span class="block-time"><strong>' + blockLabel + '</strong>' +
-        (b.day ? ' · ' + b.day : '') +
-        ' &nbsp; ' + fmtTime(b.start) + ' – ' + fmtTime(b.end) + '</span>' +
-      '<span class="block-dur">' + b.duration + ' min</span>' +
+      '<span class="block-label">Block ' + (i + 1) + '</span>' +
+      '<input class="block-edit block-edit-day" id="block-day-' + i + '" type="text" ' +
+        'value="' + (b.day || '') + '" placeholder="Day" ' +
+        'onchange="updateBlock(' + i + ')" oninput="updateBlock(' + i + ')">' +
+      '<input class="block-edit block-edit-time" id="block-start-' + i + '" type="time" ' +
+        'value="' + minsToTime(b.start) + '" ' +
+        'onchange="updateBlock(' + i + ')" oninput="updateBlock(' + i + ')">' +
+      '<span style="color:var(--muted)">–</span>' +
+      '<input class="block-edit block-edit-time" id="block-end-' + i + '" type="time" ' +
+        'value="' + minsToTime(b.end) + '" ' +
+        'onchange="updateBlock(' + i + ')" oninput="updateBlock(' + i + ')">' +
+      '<span class="block-dur" id="block-dur-' + i + '">' + b.duration + ' min</span>' +
+      '<button class="btn-icon" onclick="deleteBlock(' + i + ')" title="Remove block">×</button>' +
       '</div>';
   }
+  h += '<button class="btn-add" onclick="addBlock()">+ Add Block</button>';
   el.innerHTML = h;
 }
+
+window.updateBlock = function(i) {
+  const startEl = document.getElementById('block-start-' + i);
+  const endEl   = document.getElementById('block-end-'   + i);
+  const dayEl   = document.getElementById('block-day-'   + i);
+  if (!startEl || !endEl) return;
+  const start = timeToMins(startEl.value);
+  const end   = timeToMins(endEl.value);
+  if (isNaN(start) || isNaN(end) || end <= start) return;
+  state.blocks[i].start    = start;
+  state.blocks[i].end      = end;
+  state.blocks[i].duration = end - start;
+  if (dayEl) state.blocks[i].day = dayEl.value.trim();
+  const durEl = document.getElementById('block-dur-' + i);
+  if (durEl) durEl.textContent = (end - start) + ' min';
+  recalc();
+};
+
+window.addBlock = function() {
+  const last = state.blocks[state.blocks.length - 1];
+  const start = last ? last.end + 60 : 8 * 60;
+  const end   = start + 120;
+  state.blocks.push({ start, end, duration: 120, day: '' });
+  renderBlocks();
+  recalc();
+};
+
+window.deleteBlock = function(i) {
+  state.blocks.splice(i, 1);
+  renderBlocks();
+  recalc();
+};
 
 window.recalc = function() {
   const mpt = parseInt(document.getElementById('matchesPerTeam').value) || 10;
