@@ -219,6 +219,7 @@ details.card > summary::-webkit-details-marker { display: none; }
 
 <script type="module">
 import { extractPDFText, parseQualBlocks } from './agenda-parser.mjs';
+import { buildBlockPlans, totalMatchTime } from './schedule-layout.mjs';
 const PDFJS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379';
 const TBA_KEY = 'OgkQlossATyHZij8FEAKl0opKiW63fDDSf7Fcwnr9jcJON5XwiGHgmCVZvjFb1Lv';
 
@@ -506,33 +507,24 @@ window.recalc = function() {
     return el ? (parseFloat(el.value) || defaultCt) : defaultCt;
   });
 
-  // Total time: sum cycle time for each match, where match m → round floor(m*mpt/totalMatches)
-  let actualTimeNeeded = 0;
-  for (let m = 0; m < totalMatches; m++) {
-    actualTimeNeeded += cycleTimes[Math.min(Math.floor(m * mpt / totalMatches), mpt - 1)];
-  }
-
   let availableMin;
-  let assignments; // match count per block
+  let blockPlans;
+  let actualTimeNeeded;
 
   if (state.blocks.length === 0) {
     const manEl = document.getElementById('manualMinutes');
     availableMin = manEl ? parseInt(manEl.value) || 360 : 360;
-    assignments = [totalMatches];
+    actualTimeNeeded = totalMatchTime(totalMatches, cycleTimes, mpt);
+    blockPlans = [{
+      count: totalMatches,
+      matchStart: 0,
+      usedTime: actualTimeNeeded,
+    }];
   } else {
-    availableMin = state.blocks.reduce((s, b) => s + b.duration, 0);
-
-    if (actualTimeNeeded <= availableMin) {
-      assignments = distributeMatches(totalMatches, state.blocks);
-    } else {
-      // Overflow: fill each block to floor capacity by avg cycle time, overflow to block[1]
-      const avgCt = actualTimeNeeded / totalMatches;
-      assignments = state.blocks.map(b => Math.floor(b.duration / avgCt));
-      const totalCap = assignments.reduce((a, b) => a + b, 0);
-      if (totalCap < totalMatches) {
-        assignments[Math.min(1, state.blocks.length - 1)] += totalMatches - totalCap;
-      }
-    }
+    const layout = buildBlockPlans(totalMatches, cycleTimes, mpt, state.blocks);
+    availableMin = layout.availableMin;
+    actualTimeNeeded = layout.actualTimeNeeded;
+    blockPlans = layout.blockPlans;
   }
 
   const surplus = availableMin - actualTimeNeeded;
@@ -559,7 +551,7 @@ window.recalc = function() {
     stat(fitLabel, 'Status', fitClass) +
     stat(reqCycle.toFixed(1) + ' min', 'Max Cycle to Fit');
 
-  renderTimeline(assignments, cycleTimes, totalMatches, mpt, availableMin, fitClass);
+  renderTimeline(blockPlans, totalMatches, mpt, availableMin, fitClass);
 };
 
 window.updateAllCycleTimes = function() {
@@ -579,31 +571,15 @@ function stat(val, label, cls) {
     val + '</div><div class="stat-label">' + label + '</div></div>';
 }
 
-function distributeMatches(totalMatches, blocks) {
-  // Proportional to block duration, whole-match granularity
-  const totalDur = blocks.reduce((s, b) => s + b.duration, 0);
-  const counts = blocks.map(b => Math.floor(b.duration / totalDur * totalMatches));
-  let assigned = counts.reduce((a, b) => a + b, 0);
-  const fracs = blocks.map((b, i) => [i, b.duration / totalDur * totalMatches - counts[i]]);
-  fracs.sort((a, b) => b[1] - a[1]);
-  for (let i = 0; assigned < totalMatches; i++, assigned++) counts[fracs[i][0]]++;
-  return counts;
-}
-
-function renderTimeline(assignments, cycleTimes, totalMatches, mpt, totalAvail, fitClass) {
+function renderTimeline(blockPlans, totalMatches, mpt, totalAvail, fitClass) {
   const el = document.getElementById('timeline');
   const defaultColor = fitClass === 'fit' ? 'var(--success)' :
                        fitClass === 'tight' ? 'var(--warning)' : 'var(--error)';
 
-  // Helper: cycle time for match index m (0-based)
-  function ctForMatch(m) {
-    return cycleTimes[Math.min(Math.floor(m * mpt / totalMatches), mpt - 1)] || 8;
-  }
-
   if (state.blocks.length === 0) {
-    const count = assignments[0] || 0;
-    let time = 0;
-    for (let m = 0; m < count; m++) time += ctForMatch(m);
+    const plan = blockPlans[0] || { count: 0, usedTime: 0 };
+    const count = plan.count || 0;
+    const time = plan.usedTime || 0;
     const pct = Math.min(time / totalAvail * 100, 100);
     el.innerHTML =
       '<div class="timeline-bar">' +
@@ -614,14 +590,12 @@ function renderTimeline(assignments, cycleTimes, totalMatches, mpt, totalAvail, 
   }
 
   let html = '';
-  let matchStart = 0;
   for (let bi = 0; bi < state.blocks.length; bi++) {
     const block = state.blocks[bi];
-    const count = assignments[bi] || 0;
-
-    // Time for this block using per-match cycle times
-    let usedTime = 0;
-    for (let m = matchStart; m < matchStart + count; m++) usedTime += ctForMatch(m);
+    const plan = blockPlans[bi] || { count: 0, matchStart: 0, usedTime: 0, actualEnd: block.start, overage: -block.duration, fillPct: 0 };
+    const count = plan.count || 0;
+    const usedTime = plan.usedTime || 0;
+    const matchStart = plan.matchStart || 0;
 
     // Which rounds span this block?
     let roundRange = 'No matches';
@@ -633,8 +607,8 @@ function renderTimeline(assignments, cycleTimes, totalMatches, mpt, totalAvail, 
         : 'Rounds ' + (firstR + 1) + '–' + (lastR + 1);
     }
 
-    const overage  = Math.round(usedTime - block.duration);
-    const fillPct  = block.duration > 0 ? Math.min(usedTime / block.duration * 100, 100) : 0;
+    const overage  = Math.round(plan.overage || 0);
+    const fillPct  = plan.fillPct || 0;
 
     let color;
     if (overage > 0)       color = 'var(--warning)';
@@ -642,16 +616,16 @@ function renderTimeline(assignments, cycleTimes, totalMatches, mpt, totalAvail, 
     else                   color = 'var(--success)';
 
     const endDisplay = overage > 0
-      ? fmtTime(block.end) + ' <span style="color:var(--warning);font-weight:600">+' + overage + ' min</span>'
+      ? fmtTime(plan.actualEnd) + ' <span style="color:var(--warning);font-weight:600">+' + overage + ' min</span>'
       : overage < 0
-        ? fmtTime(block.end) + ' <span style="color:var(--success);font-weight:600">−' + Math.abs(overage) + ' min</span>'
-        : fmtTime(block.end);
+        ? fmtTime(plan.actualEnd) + ' <span style="color:var(--success);font-weight:600">−' + Math.abs(overage) + ' min</span>'
+        : fmtTime(plan.actualEnd);
 
     const blockLabel = '<strong>Block ' + (bi + 1) + (block.day ? ' · ' + block.day : '') + '</strong>';
     const annotation = roundRange + ' &nbsp;·&nbsp; ' + count + ' matches · ' + Math.round(usedTime) + ' min'
       + (overage > 0 ? ' <span style="color:var(--warning)">+' + overage + ' min over</span>'
-         : overage < 0 ? ' <span style="color:var(--success)">· ' + Math.abs(overage) + ' min buffer</span>'
-         : '');
+          : overage < 0 ? ' <span style="color:var(--success)">· ' + Math.abs(overage) + ' min buffer</span>'
+          : '');
 
     html +=
       '<div class="timeline-meta">' +
@@ -663,8 +637,6 @@ function renderTimeline(assignments, cycleTimes, totalMatches, mpt, totalAvail, 
         '<div class="timeline-fill" style="width:' + fillPct + '%;background:' + color + '"></div>' +
       '</div>' +
       '<div style="font-size:0.78rem;color:var(--muted);padding:2px 4px 10px;">' + annotation + '</div>';
-
-    matchStart += count;
   }
 
   el.innerHTML = html;

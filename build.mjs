@@ -1,5 +1,5 @@
 /**
- * Build script: inlines agenda-parser.mjs into index.html, writing dist/index.html.
+ * Build script: inlines local ES modules into index.html, writing dist/index.html.
  *
  * The resulting dist/index.html has no ES-module imports so it works when opened
  * directly from the filesystem (file://) as well as from any HTTP server or
@@ -15,18 +15,19 @@ const read  = f => readFileSync(join(__dir, f), 'utf8');
 
 // Read sources
 let html = read('index.html');
-let mod  = read('agenda-parser.mjs');
 
-// Strip "export " from top-level declarations so they become plain local functions
-mod = mod.replace(/^export ((?:async )?(?:function|const|let|var))/gm, '$1');
-
-// Replace the single import line with the inlined module content
-const importRe = /^import \{[^}]+\} from '\.\/agenda-parser\.mjs';\n/m;
-if (!importRe.test(html)) {
-  console.error('ERROR: could not find agenda-parser import in index.html');
-  process.exit(1);
+function inlineModule(source, moduleFile, importRe) {
+  let mod = read(moduleFile);
+  mod = mod.replace(/^export ((?:async )?(?:function|const|let|var))/gm, '$1');
+  if (!importRe.test(source)) {
+    console.error(`ERROR: could not find ${moduleFile} import in index.html`);
+    process.exit(1);
+  }
+  return source.replace(importRe, mod + '\n');
 }
-html = html.replace(importRe, mod + '\n');
+
+html = inlineModule(html, 'agenda-parser.mjs', /^import \{[^}]+\} from '\.\/agenda-parser\.mjs';\n/m);
+html = inlineModule(html, 'schedule-layout.mjs', /^import \{[^}]+\} from '\.\/schedule-layout\.mjs';\n/m);
 
 mkdirSync(join(__dir, 'dist'), { recursive: true });
 writeFileSync(join(__dir, 'dist', 'index.html'), html);

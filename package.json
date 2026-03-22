@@ -4,7 +4,7 @@
   "scripts": {
     "build": "node build.mjs",
     "dev": "npx serve .",
-    "test": "node test-agenda.mjs"
+    "test": "node test-schedule-layout.mjs && node test-agenda.mjs"
   },
   "dependencies": {
     "pdfjs-dist": "4.0.379"
