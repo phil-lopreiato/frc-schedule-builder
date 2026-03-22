@@ -228,6 +228,25 @@ let state = { teams: 0, blocks: [], eventName: '' };
 let lastRenderedMpt = -1;
 let prevDefaultCt = 8;
 
+function getEventRoute(code) {
+  return '#/event/' + encodeURIComponent(code);
+}
+
+function readEventRoute() {
+  const hash = location.hash || '';
+  const routeMatch = hash.match(/^#\/event\/([^/?#]+)/i);
+  if (routeMatch) return decodeURIComponent(routeMatch[1]).toLowerCase();
+  return hash.startsWith('#') && hash.length > 1
+    ? decodeURIComponent(hash.slice(1)).toLowerCase()
+    : '';
+}
+
+function writeEventRoute(code) {
+  const nextHash = getEventRoute(code);
+  if (location.hash === nextHash) return;
+  history.replaceState(null, '', nextHash);
+}
+
 function maybeRenderRounds(mpt, defaultCt, totalMatches) {
   if (mpt === lastRenderedMpt) return;
   lastRenderedMpt = mpt;
@@ -365,6 +384,7 @@ window.loadEvent = async function() {
       fetchTeams(code),
       fetchEventInfo(code)
     ]);
+    writeEventRoute(code);
 
     state.teams = teams.length;
     document.getElementById('teamCount').value = state.teams;
@@ -733,8 +753,9 @@ _input.addEventListener('keydown', e => {
 ensureSearchIndex();
 
 // Auto-load from URL hash
-if (location.hash) {
-  document.getElementById('eventCode').value = location.hash.slice(1);
+const routeEventKey = readEventRoute();
+if (routeEventKey) {
+  document.getElementById('eventCode').value = routeEventKey;
   loadEvent();
 }
 </script>
