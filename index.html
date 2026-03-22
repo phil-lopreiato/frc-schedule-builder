@@ -229,12 +229,12 @@ let lastRenderedMpt = -1;
 let prevDefaultCt = 8;
 
 function getEventRoute(code) {
-  return '#/event/' + encodeURIComponent(code);
+  return '#event/' + encodeURIComponent(code);
 }
 
 function readEventRoute() {
   const hash = location.hash || '';
-  const routeMatch = hash.match(/^#\/event\/([^/?#]+)/i);
+  const routeMatch = hash.match(/^#event\/([^/?#]+)/i);
   if (routeMatch) return decodeURIComponent(routeMatch[1]).toLowerCase();
   return hash.startsWith('#') && hash.length > 1
     ? decodeURIComponent(hash.slice(1)).toLowerCase()
