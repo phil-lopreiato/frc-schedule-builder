@@ -26,6 +26,11 @@ export function buildBlockPlans(totalMatches, cycleTimes, mpt, blocks) {
     remainingBlockTime[i] = remainingBlockTime[i + 1] + blocks[i].duration;
   }
 
+  // Extra matches beyond the allotted block time should overflow into the middle
+  // block, not the first block. Only allow forced overflow from the middle block
+  // index onwards so that earlier blocks never run past their scheduled duration.
+  const middleBlockIndex = Math.floor(blocks.length / 2);
+
   let matchStart = 0;
   const blockPlans = blocks.map((block, blockIndex) => {
     const startMatch = matchStart;
@@ -36,7 +41,7 @@ export function buildBlockPlans(totalMatches, cycleTimes, mpt, blocks) {
       const futureCapacity = remainingBlockTime[blockIndex + 1];
       const remainingAfterCurrent = remainingMatchTime[matchStart];
       const fitsInWindow = usedTime + matchTime <= block.duration;
-      const mustUseCurrentWindow = remainingAfterCurrent > futureCapacity;
+      const mustUseCurrentWindow = blockIndex >= middleBlockIndex && remainingAfterCurrent > futureCapacity;
 
       if (!fitsInWindow && !mustUseCurrentWindow) break;
 
