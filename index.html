@@ -100,6 +100,10 @@ input.block-edit-time { width: 110px; }
 .btn-icon:hover { color: var(--error); border-color: var(--error); filter: none; }
 .btn-add { height: 30px; padding: 0 12px; background: none; border: 1px dashed var(--border); border-radius: 5px; color: var(--muted); font-weight: 500; font-size: 0.8rem; margin: 6px 12px; cursor: pointer; }
 .btn-add:hover { border-color: var(--accent); color: var(--accent); filter: none; }
+.share-url-row { display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+.share-url-row input { flex: 1; min-width: 0; height: 40px; padding: 0 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font-size: 0.8rem; font-family: monospace; }
+.btn-secondary { background: none; border: 1px solid var(--border); color: var(--text); }
+.btn-secondary:hover { border-color: var(--accent); color: var(--accent); filter: none; }
 .round-list { margin-top: 8px; }
 .round-item {
   display: flex; align-items: center; gap: 10px;
@@ -215,6 +219,15 @@ details.card > summary::-webkit-details-marker { display: none; }
       <h2>Timeline</h2>
       <div class="timeline-container" id="timeline"></div>
     </div>
+
+    <div class="card">
+      <h2>Share / Export</h2>
+      <p style="font-size:0.85rem;color:var(--muted);margin-bottom:4px">Share a link with all current settings pre-loaded.</p>
+      <div class="share-url-row">
+        <input id="shareUrl" type="text" readonly>
+        <button id="copyShareBtn" class="btn-secondary" onclick="copyShareUrl()">Copy link</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -227,6 +240,52 @@ const TBA_KEY = 'OgkQlossATyHZij8FEAKl0opKiW63fDDSf7Fcwnr9jcJON5XwiGHgmCVZvjFb1L
 let state = { teams: 0, blocks: [], eventName: '' };
 let lastRenderedMpt = -1;
 let prevDefaultCt = 8;
+
+function encodeBase64(str) {
+  return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/gi,
+    (_, hex) => String.fromCharCode(parseInt(hex, 16))));
+}
+
+function decodeBase64(b64) {
+  return decodeURIComponent(
+    [...atob(b64)].map(c => '%' + c.charCodeAt(0).toString(16).padStart(2, '0')).join('')
+  );
+}
+
+function serializeState() {
+  const mpt = parseInt(document.getElementById('matchesPerTeam').value) || 10;
+  const ct  = parseFloat(document.getElementById('cycleTime').value) || 8;
+  const tc  = parseInt(document.getElementById('teamCount').value) || 0;
+  const ec  = document.getElementById('eventCode').value.trim();
+  const pct = Array.from({length: mpt}, (_, i) => {
+    const el = document.getElementById('cycletime-round-' + i);
+    return el ? (parseFloat(el.value) || ct) : ct;
+  });
+  const blocks = state.blocks.map(b => ({ d: b.day || '', s: minsToTime(b.start), e: minsToTime(b.end) }));
+  const data = { v: 1, ec, en: state.eventName || '', tc, mpt, ct, pct, blocks };
+  if (state.blocks.length === 0) {
+    const manEl = document.getElementById('manualMinutes');
+    data.mm = manEl ? (parseInt(manEl.value) || 360) : 360;
+  }
+  return encodeBase64(JSON.stringify(data));
+}
+
+function updateShareUrl() {
+  const el = document.getElementById('shareUrl');
+  if (!el) return;
+  el.value = location.origin + location.pathname + '?s=' + serializeState();
+}
+
+window.copyShareUrl = function() {
+  const el = document.getElementById('shareUrl');
+  if (!el) return;
+  const btn = document.getElementById('copyShareBtn');
+  const flash = () => { if (btn) { btn.textContent = 'Copied!'; setTimeout(() => { btn.textContent = 'Copy link'; }, 1500); } };
+  navigator.clipboard.writeText(el.value).then(flash).catch(() => {
+    el.select();
+    try { document.execCommand('copy'); flash(); } catch(_) {}
+  });
+};
 
 function getEventRoute(code) {
   return '#event/' + encodeURIComponent(code);
@@ -245,6 +304,61 @@ function writeEventRoute(code) {
   const nextHash = getEventRoute(code);
   if (location.hash === nextHash) return;
   history.replaceState(null, '', nextHash);
+}
+
+function loadFromShareParam() {
+  const params = new URLSearchParams(location.search);
+  const s = params.get('s');
+  if (!s) return false;
+  try {
+    const data = JSON.parse(decodeBase64(s));
+    if (!data || data.v !== 1) return false;
+
+    if (data.ec) document.getElementById('eventCode').value = data.ec;
+    state.eventName = data.en || '';
+    state.teams     = data.tc || 0;
+    state.blocks    = (data.blocks || []).map(b => {
+      const start = timeToMins(b.s), end = timeToMins(b.e);
+      return { day: b.d || '', start, end, duration: end - start };
+    });
+
+    document.getElementById('teamCount').value      = data.tc  || '';
+    document.getElementById('matchesPerTeam').value = data.mpt || 10;
+    document.getElementById('cycleTime').value      = data.ct  || 8;
+    prevDefaultCt = data.ct || 8;
+
+    // Render round inputs before setting per-round values
+    const mpt = data.mpt || 10;
+    const tc  = data.tc  || 0;
+    renderRounds(mpt, data.ct || 8, Math.ceil(tc * mpt / 6));
+    lastRenderedMpt = mpt;
+    if (data.pct) {
+      data.pct.forEach((v, i) => {
+        const el = document.getElementById('cycletime-round-' + i);
+        if (el) el.value = v;
+      });
+    }
+
+    document.getElementById('eventName').textContent   = state.eventName;
+    document.getElementById('eventDetail').textContent = state.teams + ' teams';
+
+    renderBlocks();
+
+    if (state.blocks.length === 0 && data.mm != null) {
+      const manEl = document.getElementById('manualMinutes');
+      if (manEl) manEl.value = data.mm;
+    }
+
+    recalc();
+    document.getElementById('results').classList.remove('hidden');
+    // Replace the ?s= param with the event hash so bookmarking/refreshing works cleanly
+    history.replaceState(null, '', data.ec ? getEventRoute(data.ec) : location.pathname);
+    setStatus('Loaded from shared link!', 'ok');
+    return true;
+  } catch (e) {
+    console.error('Failed to load from share param:', e);
+    return false;
+  }
 }
 
 function maybeRenderRounds(mpt, defaultCt, totalMatches) {
@@ -573,6 +687,7 @@ window.recalc = function() {
     stat(reqCycle.toFixed(1) + ' min', 'Max Cycle to Fit');
 
   renderTimeline(blockPlans, totalMatches, mpt, availableMin, fitClass);
+  updateShareUrl();
 };
 
 window.updateAllCycleTimes = function() {
@@ -752,11 +867,13 @@ _input.addEventListener('keydown', e => {
 // Pre-fetch search index in the background
 ensureSearchIndex();
 
-// Auto-load from URL hash
-const routeEventKey = readEventRoute();
-if (routeEventKey) {
-  document.getElementById('eventCode').value = routeEventKey;
-  loadEvent();
+// Auto-load from share param (?s=) or fall back to URL hash (#event/...)
+if (!loadFromShareParam()) {
+  const routeEventKey = readEventRoute();
+  if (routeEventKey) {
+    document.getElementById('eventCode').value = routeEventKey;
+    loadEvent();
+  }
 }
 </script>
 </body>
