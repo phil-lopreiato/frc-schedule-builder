@@ -50,3 +50,32 @@ const blocks = [
 }
 
 console.log('✓ schedule layout reflow tests passed');
+
+{
+  // When the total schedule exceeds available time, overflow should go into the
+  // middle block (block index 1), not the first block (block index 0).
+  const threeBlocks = [
+    { start: 9 * 60, duration: 60 },
+    { start: 11 * 60, duration: 60 },
+    { start: 14 * 60, duration: 60 },
+  ];
+  const totalMatches = 24;
+  const mpt = 1;
+  const cycleTimes = [10];
+  const layout = buildBlockPlans(totalMatches, cycleTimes, mpt, threeBlocks);
+
+  assert.equal(layout.actualTimeNeeded, 240);
+  assert.equal(layout.availableMin, 180);
+  assert.deepEqual(
+    layout.blockPlans.map(plan => plan.count),
+    [6, 12, 6],
+    'overflow matches should land in the middle block, not the first block'
+  );
+  assert.deepEqual(
+    layout.blockPlans.map(plan => plan.usedTime),
+    [60, 120, 60],
+    'first and last blocks should not exceed their scheduled duration'
+  );
+}
+
+console.log('✓ schedule layout overflow tests passed');
