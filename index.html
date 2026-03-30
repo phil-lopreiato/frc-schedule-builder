@@ -241,18 +241,28 @@ let state = { teams: 0, blocks: [], eventName: '' };
 let lastRenderedMpt = -1;
 let prevDefaultCt = 8;
 
-function encodeBase64(str) {
-  return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/gi,
-    (_, hex) => String.fromCharCode(parseInt(hex, 16))));
+async function compressAndEncode(str) {
+  const bytes = new TextEncoder().encode(str);
+  const cs = new CompressionStream('gzip');
+  const writer = cs.writable.getWriter();
+  writer.write(bytes);
+  writer.close();
+  const buf = await new Response(cs.readable).arrayBuffer();
+  const arr = new Uint8Array(buf);
+  return btoa(Array.from(arr, b => String.fromCharCode(b)).join(''));
 }
 
-function decodeBase64(b64) {
-  return decodeURIComponent(
-    [...atob(b64)].map(c => '%' + c.charCodeAt(0).toString(16).padStart(2, '0')).join('')
-  );
+async function decompressAndDecode(b64) {
+  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  const ds = new DecompressionStream('gzip');
+  const writer = ds.writable.getWriter();
+  writer.write(bytes);
+  writer.close();
+  const buf = await new Response(ds.readable).arrayBuffer();
+  return new TextDecoder().decode(buf);
 }
 
-function serializeState() {
+async function serializeState() {
   const mpt = parseInt(document.getElementById('matchesPerTeam').value) || 10;
   const ct  = parseFloat(document.getElementById('cycleTime').value) || 8;
   const tc  = parseInt(document.getElementById('teamCount').value) || 0;
@@ -267,13 +277,13 @@ function serializeState() {
     const manEl = document.getElementById('manualMinutes');
     data.mm = manEl ? (parseInt(manEl.value) || 360) : 360;
   }
-  return encodeBase64(JSON.stringify(data));
+  return compressAndEncode(JSON.stringify(data));
 }
 
-function updateShareUrl() {
+async function updateShareUrl() {
   const el = document.getElementById('shareUrl');
   if (!el) return;
-  el.value = location.origin + location.pathname + '?s=' + serializeState();
+  el.value = location.origin + location.pathname + '#s=' + await serializeState();
 }
 
 window.copyShareUrl = function() {
@@ -295,6 +305,7 @@ function readEventRoute() {
   const hash = location.hash || '';
   const routeMatch = hash.match(/^#event\/([^/?#]+)/i);
   if (routeMatch) return decodeURIComponent(routeMatch[1]).toLowerCase();
+  if (hash.startsWith('#s=')) return ''; // share param, not an event code
   return hash.startsWith('#') && hash.length > 1
     ? decodeURIComponent(hash.slice(1)).toLowerCase()
     : '';
@@ -306,12 +317,13 @@ function writeEventRoute(code) {
   history.replaceState(null, '', nextHash);
 }
 
-function loadFromShareParam() {
-  const params = new URLSearchParams(location.search);
-  const s = params.get('s');
+async function loadFromShareParam() {
+  const hash = location.hash || '';
+  if (!hash.startsWith('#s=')) return false;
+  const s = hash.slice(3);
   if (!s) return false;
   try {
-    const data = JSON.parse(decodeBase64(s));
+    const data = JSON.parse(await decompressAndDecode(s));
     if (!data || data.v !== 1) return false;
 
     if (data.ec) document.getElementById('eventCode').value = data.ec;
@@ -867,14 +879,16 @@ _input.addEventListener('keydown', e => {
 // Pre-fetch search index in the background
 ensureSearchIndex();
 
-// Auto-load from share param (?s=) or fall back to URL hash (#event/...)
-if (!loadFromShareParam()) {
-  const routeEventKey = readEventRoute();
-  if (routeEventKey) {
-    document.getElementById('eventCode').value = routeEventKey;
-    loadEvent();
+// Auto-load from share param (#s= or legacy ?s=) or fall back to URL hash (#event/...)
+loadFromShareParam().then(loaded => {
+  if (!loaded) {
+    const routeEventKey = readEventRoute();
+    if (routeEventKey) {
+      document.getElementById('eventCode').value = routeEventKey;
+      loadEvent();
+    }
   }
-}
+}).catch(e => console.error('Error during share param load:', e));
 </script>
 </body>
 </html>
