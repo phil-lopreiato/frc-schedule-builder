@@ -129,7 +129,7 @@ details.card > summary::-webkit-details-marker { display: none; }
 .event-header { margin-bottom: 16px; }
 .event-name { font-size: 1.1rem; font-weight: 600; }
 .event-detail { font-size: 0.85rem; color: var(--muted); }
-.agenda-link { display: inline-block; margin-top: 4px; font-size: 0.8rem; }
+.agenda-link { display: inline-block; margin-top: 4px; font-size: 0.8rem; color: var(--accent); }
 .hidden { display: none !important; }
 #results { transition: opacity 0.2s ease; }
 .typeahead-wrap { position: relative; }
@@ -366,6 +366,16 @@ async function loadFromShareParam() {
     // Replace the ?s= param with the event hash so bookmarking/refreshing works cleanly
     history.replaceState(null, '', data.ec ? getEventRoute(data.ec) : location.pathname);
     setStatus('Loaded from shared link!', 'ok');
+
+    // Fetch agenda PDF in the background to show the link
+    if (data.ec) {
+      fetchAgendaPDF(data.ec).then(({ url }) => {
+        state.pdfUrl = url;
+        document.getElementById('agendaLink').href = url;
+        document.getElementById('agendaLink').classList.remove('hidden');
+      }).catch(e => console.warn('Agenda PDF unavailable for shared link:', e));
+    }
+
     return true;
   } catch (e) {
     console.error('Failed to load from share param:', e);
