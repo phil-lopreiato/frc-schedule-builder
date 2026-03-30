@@ -241,17 +241,6 @@ let state = { teams: 0, blocks: [], eventName: '' };
 let lastRenderedMpt = -1;
 let prevDefaultCt = 8;
 
-function encodeBase64(str) {
-  return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/gi,
-    (_, hex) => String.fromCharCode(parseInt(hex, 16))));
-}
-
-function decodeBase64(b64) {
-  return decodeURIComponent(
-    [...atob(b64)].map(c => '%' + c.charCodeAt(0).toString(16).padStart(2, '0')).join('')
-  );
-}
-
 async function compressAndEncode(str) {
   const bytes = new TextEncoder().encode(str);
   const cs = new CompressionStream('gzip');
@@ -329,26 +318,12 @@ function writeEventRoute(code) {
 }
 
 async function loadFromShareParam() {
-  // Check new hash-based format (#s=<gzip-base64>) first, then legacy query param (?s=<base64>)
   const hash = location.hash || '';
-  let s, isLegacy;
-  if (hash.startsWith('#s=')) {
-    s = hash.slice(3);
-    isLegacy = false;
-  } else {
-    const params = new URLSearchParams(location.search);
-    s = params.get('s');
-    isLegacy = true;
-  }
+  if (!hash.startsWith('#s=')) return false;
+  const s = hash.slice(3);
   if (!s) return false;
   try {
-    let json;
-    if (isLegacy) {
-      json = decodeBase64(s);
-    } else {
-      json = await decompressAndDecode(s);
-    }
-    const data = JSON.parse(json);
+    const data = JSON.parse(await decompressAndDecode(s));
     if (!data || data.v !== 1) return false;
 
     if (data.ec) document.getElementById('eventCode').value = data.ec;
