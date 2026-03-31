@@ -689,6 +689,7 @@ window.recalc = function() {
   const avgCt = totalMatches > 0 ? actualTimeNeeded / totalMatches : defaultCt;
   const mpr = avgCt > 0 ? (60 / avgCt) : 0;
   const reqCycle = availableMin > 0 && totalMatches > 0 ? (availableMin / totalMatches) : 0;
+  const matchesPerRound = mpt > 0 ? totalMatches / mpt : 0;
 
   let fitClass, fitLabel;
   if (pct <= 85)       { fitClass = 'fit';   fitLabel = 'Comfortable'; }
@@ -699,6 +700,7 @@ window.recalc = function() {
   sg.innerHTML =
     stat(totalMatches, 'Total Matches') +
     stat(surrogates, 'Surrogates') +
+    stat(matchesPerRound.toFixed(1), 'Matches / Round') +
     stat(mpr.toFixed(1), 'Matches / Hour') +
     stat(Math.round(actualTimeNeeded) + ' min', 'Time Needed') +
     stat(availableMin + ' min', 'Time Available') +
