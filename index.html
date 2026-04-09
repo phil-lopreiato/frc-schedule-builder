@@ -707,9 +707,9 @@ window.recalc = function() {
   const matchesPerRound = numTeams / teamsPerMatch;
 
   let fitClass, fitLabel;
-  if (pct <= 85)       { fitClass = 'fit';   fitLabel = 'Comfortable'; }
-  else if (pct <= 100) { fitClass = 'tight'; fitLabel = 'Tight'; }
-  else                 { fitClass = 'over';  fitLabel = 'Over Capacity'; }
+  if (surplus > 15)      { fitClass = 'fit';   fitLabel = 'Comfortable'; }
+  else if (surplus >= -15) { fitClass = 'tight'; fitLabel = 'Tight'; }
+  else                   { fitClass = 'over';  fitLabel = 'Over Capacity'; }
 
   const sg = document.getElementById('statsGrid');
   sg.innerHTML =
