@@ -248,6 +248,7 @@ const TBA_KEY = 'OgkQlossATyHZij8FEAKl0opKiW63fDDSf7Fcwnr9jcJON5XwiGHgmCVZvjFb1L
 
 let state = { teams: 0, blocks: [], eventName: '', isManual: false };
 let lastRenderedMpt = -1;
+let lastRenderedTotalMatches = -1;
 let prevDefaultCt = 8;
 
 async function compressAndEncode(str) {
@@ -355,6 +356,7 @@ async function loadFromShareParam() {
     const tc  = data.tc  || 0;
     renderRounds(mpt, data.ct || 8, Math.ceil(tc * mpt / 6));
     lastRenderedMpt = mpt;
+    lastRenderedTotalMatches = Math.ceil(tc * mpt / 6);
     if (data.pct) {
       data.pct.forEach((v, i) => {
         const el = document.getElementById('cycletime-round-' + i);
@@ -395,8 +397,9 @@ async function loadFromShareParam() {
 }
 
 function maybeRenderRounds(mpt, defaultCt, totalMatches) {
-  if (mpt === lastRenderedMpt) return;
+  if (mpt === lastRenderedMpt && totalMatches === lastRenderedTotalMatches) return;
   lastRenderedMpt = mpt;
+  lastRenderedTotalMatches = totalMatches;
   renderRounds(mpt, defaultCt, totalMatches);
 }
 
@@ -840,6 +843,7 @@ window.startManualEntry = function() {
   document.getElementById('cycleTime').value         = 8;
   prevDefaultCt = 8;
   lastRenderedMpt = -1;
+  lastRenderedTotalMatches = -1;
 
   renderBlocks();
   recalc();
