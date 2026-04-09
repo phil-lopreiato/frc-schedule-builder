@@ -173,6 +173,15 @@ details.card > summary::-webkit-details-marker { display: none; }
         </div>
       </div>
       <button id="loadBtn" onclick="loadEvent()">Load Event</button>
+      <button id="manualBtn" class="btn-secondary" onclick="showManualEntryRow()">Manual Entry</button>
+    </div>
+    <div id="manualEntryRow" class="input-row hidden" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+      <div class="field" style="flex:2;min-width:160px">
+        <label>Event Title</label>
+        <input id="manualTitle" type="text" placeholder="e.g. Offseason Showdown 2026" spellcheck="false" autocomplete="off">
+      </div>
+      <button onclick="startManualEntry()">Start</button>
+      <button class="btn-secondary" onclick="cancelManualEntry()">Cancel</button>
     </div>
     <div id="status"></div>
   </div>
@@ -237,7 +246,7 @@ import { buildBlockPlans, totalMatchTime } from './schedule-layout.mjs';
 const PDFJS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379';
 const TBA_KEY = 'OgkQlossATyHZij8FEAKl0opKiW63fDDSf7Fcwnr9jcJON5XwiGHgmCVZvjFb1Lv';
 
-let state = { teams: 0, blocks: [], eventName: '' };
+let state = { teams: 0, blocks: [], eventName: '', isManual: false };
 let lastRenderedMpt = -1;
 let prevDefaultCt = 8;
 
@@ -266,7 +275,7 @@ async function serializeState() {
   const mpt = parseInt(document.getElementById('matchesPerTeam').value) || 10;
   const ct  = parseFloat(document.getElementById('cycleTime').value) || 8;
   const tc  = parseInt(document.getElementById('teamCount').value) || 0;
-  const ec  = document.getElementById('eventCode').value.trim();
+  const ec  = state.isManual ? '' : document.getElementById('eventCode').value.trim();
   const pct = Array.from({length: mpt}, (_, i) => {
     const el = document.getElementById('cycletime-round-' + i);
     return el ? (parseFloat(el.value) || ct) : ct;
@@ -306,6 +315,7 @@ function readEventRoute() {
   const routeMatch = hash.match(/^#event\/([^/?#]+)/i);
   if (routeMatch) return decodeURIComponent(routeMatch[1]).toLowerCase();
   if (hash.startsWith('#s=')) return ''; // share param, not an event code
+  if (hash === '#manual') return '';      // manual entry mode
   return hash.startsWith('#') && hash.length > 1
     ? decodeURIComponent(hash.slice(1)).toLowerCase()
     : '';
@@ -329,6 +339,7 @@ async function loadFromShareParam() {
     if (data.ec) document.getElementById('eventCode').value = data.ec;
     state.eventName = data.en || '';
     state.teams     = data.tc || 0;
+    state.isManual  = !data.ec;
     state.blocks    = (data.blocks || []).map(b => {
       const start = timeToMins(b.s), end = timeToMins(b.e);
       return { day: b.d || '', start, end, duration: end - start };
@@ -364,7 +375,7 @@ async function loadFromShareParam() {
     recalc();
     document.getElementById('results').classList.remove('hidden');
     // Replace the ?s= param with the event hash so bookmarking/refreshing works cleanly
-    history.replaceState(null, '', data.ec ? getEventRoute(data.ec) : location.pathname);
+    history.replaceState(null, '', data.ec ? getEventRoute(data.ec) : '#manual');
     setStatus('Loaded from shared link!', 'ok');
 
     // Fetch agenda PDF in the background to show the link
@@ -496,6 +507,7 @@ window.loadEvent = async function() {
   const raw = document.getElementById('eventCode').value.trim().toLowerCase();
   hideTypeahead();
   if (!raw) { setStatus('Enter an event code or name', 'error'); return; }
+  state.isManual = false;
 
   // If the user typed a display name (not a key), resolve it to the key
   let code = raw;
@@ -802,6 +814,40 @@ function renderTimeline(blockPlans, totalMatches, mpt, totalAvail, fitClass) {
   el.innerHTML = html;
 }
 
+window.showManualEntryRow = function() {
+  document.getElementById('manualEntryRow').classList.remove('hidden');
+  document.getElementById('manualTitle').focus();
+};
+
+window.cancelManualEntry = function() {
+  document.getElementById('manualEntryRow').classList.add('hidden');
+};
+
+window.startManualEntry = function() {
+  const title = document.getElementById('manualTitle').value.trim() || 'Custom Event';
+  state.eventName = title;
+  state.teams     = 0;
+  state.blocks    = [];
+  state.isManual  = true;
+
+  document.getElementById('manualEntryRow').classList.add('hidden');
+  document.getElementById('eventCode').value = '';
+  document.getElementById('agendaLink').classList.add('hidden');
+  document.getElementById('eventName').textContent   = title;
+  document.getElementById('eventDetail').textContent = 'Manual entry';
+  document.getElementById('teamCount').value         = '';
+  document.getElementById('matchesPerTeam').value    = 10;
+  document.getElementById('cycleTime').value         = 8;
+  prevDefaultCt = 8;
+  lastRenderedMpt = -1;
+
+  renderBlocks();
+  recalc();
+  document.getElementById('results').classList.remove('hidden');
+  history.replaceState(null, '', '#manual');
+  setStatus('', '');
+};
+
 // Typeahead
 let searchIndex = null;
 let taActive = -1;
@@ -850,6 +896,10 @@ function taUpdateActive(items) {
 }
 
 const _input = document.getElementById('eventCode');
+
+document.getElementById('manualTitle').addEventListener('keydown', e => {
+  if (e.key === 'Enter') startManualEntry();
+});
 
 _input.addEventListener('focus', async () => {
   await ensureSearchIndex();
