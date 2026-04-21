@@ -80,15 +80,19 @@ const CMP_DIVISION_KEY_TO_NAME = {
 };
 
 const CMP_DIVISION_NAMES = Object.values(CMP_DIVISION_KEY_TO_NAME);
+const CMP_DIVISION_NAME_LOOKUPS = CMP_DIVISION_NAMES.map(name => ({
+  name,
+  token: name.toLowerCase(),
+}));
 
 function normalizeDivisionName(name) {
   return (name || '').toLowerCase().replace(/[^a-z]/g, '');
 }
 
 function inferCmpDivisionName({ eventName = '', eventKey = '' } = {}) {
-  for (const divisionName of CMP_DIVISION_NAMES) {
-    const re = new RegExp(`\\b${divisionName}\\b`, 'i');
-    if (re.test(eventName)) return divisionName;
+  const lowerName = eventName.toLowerCase();
+  for (const division of CMP_DIVISION_NAME_LOOKUPS) {
+    if (lowerName.includes(division.token)) return division.name;
   }
   const suffix = (eventKey || '').slice(4).toLowerCase();
   return CMP_DIVISION_KEY_TO_NAME[suffix] || '';
@@ -110,7 +114,7 @@ function parseCmpDivisionQualBlocks(text, { eventName = '', eventKey = '' } = {}
 
   for (const line of lines) {
     const dayMatch = dayRe.exec(line);
-    if (dayMatch) currentDay = dayMatch[1].substring(0, 3) + ' ' + dayMatch[2];
+    if (dayMatch) currentDay = dayMatch[1].slice(0, 3) + ' ' + dayMatch[2];
 
     const qualMatch = qualRe.exec(line);
     if (qualMatch) {
