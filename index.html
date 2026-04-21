@@ -473,6 +473,10 @@ function fmtMath(n) {
   return Number.isInteger(n) ? String(n) : n.toFixed(2);
 }
 
+function roundTeamCount(n) {
+  return Math.floor(n + 0.5);
+}
+
 function createEventLinkEl(code) {
   const a = document.createElement('a');
   a.href = 'https://www.thebluealliance.com/event/' + encodeURIComponent(code);
@@ -539,7 +543,7 @@ async function resolveTeamCountInfo(eventInfo, eventTeamCount, fallbackFromParen
       const sum = loadedDivisionCounts.reduce((acc, d) => acc + d.count, 0);
       const avg = sum / loadedDivisionCounts.length;
       return {
-        count: Math.round(avg),
+        count: roundTeamCount(avg),
         math: loadedDivisionCounts.length === 1
           ? loadedDivisionCounts[0].count + ' from division ' + loadedDivisionCounts[0].key
           : sum + ' ÷ ' + loadedDivisionCounts.length + ' loaded divisions = ' + fmtMath(avg) + ' (rounded)',
@@ -549,7 +553,7 @@ async function resolveTeamCountInfo(eventInfo, eventTeamCount, fallbackFromParen
     if (eventTeamCount > 0) {
       const avg = eventTeamCount / divisionKeys.length;
       return {
-        count: Math.round(avg),
+        count: roundTeamCount(avg),
         math: eventTeamCount + ' (parent) ÷ ' + divisionKeys.length + ' divisions = ' + fmtMath(avg) + ' (rounded)',
         divisionCounts: divisionTeamCounts,
       };
@@ -689,7 +693,7 @@ window.loadEvent = async function() {
     let blocks = [];
     try {
       const agendaCode = info?.parent_event_key || code;
-      const agendaInfo = info?.parent_event_key ? (parentInfo || info) : info;
+      const agendaInfo = info?.parent_event_key ? parentInfo : info;
       const { buf: pdfBuf, url: pdfUrl } = await fetchAgendaPDF(agendaCode, agendaInfo);
       state.pdfUrl = pdfUrl;
       document.getElementById('agendaLink').href = pdfUrl;
