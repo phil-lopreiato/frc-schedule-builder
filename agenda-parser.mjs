@@ -229,7 +229,7 @@ export function parseQualBlocks(text, { districtKey = '', eventType = null, even
   // Standard / Peachtree / Chesapeake:
   //   optional single-char note marker (e.g. footnote "M", "*") on either side of the dash
   //   optional ~ on end time (Chesapeake approx times)
-  const qualRe = /(\d{1,2}:\d{2}\s*[AaPp][Mm])(?:\s+[A-Za-z*†~]{1,2})?\s*[-\u2013\u2014]\s*~?\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])(?:\s+[A-Za-z0-9*†~]{1,2})?\s+Qualification\s+Match/i;
+  const qualRe = /(\d{1,2}:\d{2}\s*[AaPp][Mm])(?:\s*[A-Za-z*†~]{1,2})?\s*[-\u2013\u2014]\s*~?\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])(?:\s*[A-Za-z0-9*†~]{1,2})?\s+Qualification\s+Match/i;
 
   // Ontario district: two-column schedule with no dash separator between start/end times.
   //   "11:30am   1:30pm   Qualification Matches"
@@ -241,6 +241,8 @@ export function parseQualBlocks(text, { districtKey = '', eventType = null, even
   //   "10:50AM   Qualification Matches Begin"
   //   "2:00PM    Qualification Matches Continue ; Exhibits Close"
   const qualBeginRe = /^~?\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])[ \t]+Qualification\s+Match(?:es?)?[ \t]+(?:Begin|Continue)/i;
+  const qualEndRe = /^~?\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])[ \t]+Qualification\s+Match(?:es?)?[ \t]+End/i;
+  const lunchRe = /^~?\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])\s*[-\u2013\u2014]\s*~?\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])(?:\s*[A-Za-z0-9*†~]{1,2})?\s+Lunch\b/i;
 
   // Leading time on a line — used to close an open "Begin" block
   const leadTimeRe = /^~?\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])/;
@@ -314,6 +316,30 @@ export function parseQualBlocks(text, { districtKey = '', eventType = null, even
       continue;
     }
 
+    const endMatch = qualEndRe.exec(line.trim());
+    if (endMatch) {
+      const t = parseTime12(endMatch[1]);
+      if (t !== null) closeOpenBlock(endMatch[1].trim(), t);
+      continue;
+    }
+
+    const lunchMatch = openBeginBlock ? lunchRe.exec(line.trim()) : null;
+    if (lunchMatch && openBeginBlock) {
+      const lunchStart = parseTime12(lunchMatch[1]);
+      const lunchEnd = parseTime12(lunchMatch[2]);
+      if (lunchStart !== null && lunchEnd !== null && lunchEnd > lunchStart) {
+        if (lunchStart > openBeginBlock.start) {
+          closeOpenBlock(lunchMatch[1].trim(), lunchStart);
+        }
+        openBeginBlock = {
+          start: Math.max(openBeginBlock?.start ?? lunchEnd, lunchEnd),
+          startStr: lunchMatch[2].trim(),
+          day: currentDay || openBeginBlock?.day || '',
+        };
+      }
+      continue;
+    }
+
     // Close an open Begin block when the next time entry appears (≥ 30 min later, so we
     // don't accidentally close on a brief intermediate time like a 5-min field break)
     if (openBeginBlock) {
@@ -330,7 +356,7 @@ export function parseQualBlocks(text, { districtKey = '', eventType = null, even
   // Fallback: join all lines and retry (handles rare PDF.js line-break concatenation)
   if (blocks.length === 0) {
     const fullText = text.replace(/\n/g, ' ');
-    const reG = /(\d{1,2}:\d{2}\s*[AaPp][Mm])(?:\s+[A-Za-z*†~]{1,2})?\s*[-\u2013\u2014]\s*~?\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])(?:\s+[A-Za-z0-9*†~]{1,2})?\s+Qualification\s+Match/gi;
+    const reG = /(\d{1,2}:\d{2}\s*[AaPp][Mm])(?:\s*[A-Za-z*†~]{1,2})?\s*[-\u2013\u2014]\s*~?\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])(?:\s*[A-Za-z0-9*†~]{1,2})?\s+Qualification\s+Match/gi;
     let m;
     while ((m = reG.exec(fullText)) !== null) {
       const start = parseTime12(m[1]);
