@@ -68,6 +68,130 @@ export async function extractPDFText(pdfjsLib, buf) {
   return normalizePDFText(allText);
 }
 
+const CMP_DIVISION_KEY_TO_NAME = {
+  arc: 'Archimedes',
+  cur: 'Curie',
+  dal: 'Daly',
+  gal: 'Galileo',
+  hop: 'Hopper',
+  joh: 'Johnson',
+  mil: 'Milstein',
+  new: 'Newton',
+};
+
+const CMP_DIVISION_NAMES = Object.values(CMP_DIVISION_KEY_TO_NAME);
+const CMP_DIVISION_NAME_LOOKUPS = CMP_DIVISION_NAMES.map(name => ({
+  name,
+  token: name.toLowerCase(),
+}));
+
+function normalizeDivisionName(name) {
+  return (name || '').toLowerCase().replace(/[^a-z]/g, '');
+}
+
+function inferCmpDivisionName({ eventName = '', eventKey = '' } = {}) {
+  const lowerName = eventName.toLowerCase();
+  for (const division of CMP_DIVISION_NAME_LOOKUPS) {
+    if (lowerName.includes(division.token)) return division.name;
+  }
+  const suffix = (eventKey || '').slice(4).toLowerCase();
+  return CMP_DIVISION_KEY_TO_NAME[suffix] || '';
+}
+
+function parseCmpDivisionQualBlocks(text, { eventName = '', eventKey = '' } = {}) {
+  const divisionName = inferCmpDivisionName({ eventName, eventKey });
+  if (!divisionName) return [];
+
+  const blocks = [];
+  const lines = text.replace(/\r/g, '').split('\n');
+  const dayRe = /\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b\s*[,]?\s+(\w+\s+\d{1,2}|\d+\/\d+\/\d+)/i;
+  const qualRe = /(\d{1,2}:\d{2}\s*[AaPp][Mm])\s*[-\u2013\u2014]\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])\s+Qualification\s+Matches/i;
+  const divisionBreakRe = /(\d{1,2}:\d{2}\s*[AaPp][Mm])\s*[-\u2013\u2014]\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])\s+Division\s+Break\s*[-\u2013\u2014]\s*([A-Za-z]+)/i;
+
+  let currentDay = '';
+  const qualsByDay = [];
+  const breaksByDay = new Map();
+
+  for (const line of lines) {
+    const dayMatch = dayRe.exec(line);
+    if (dayMatch) currentDay = dayMatch[1].slice(0, 3) + ' ' + dayMatch[2];
+
+    const qualMatch = qualRe.exec(line);
+    if (qualMatch) {
+      const start = parseTime12(qualMatch[1]);
+      const end = parseTime12(qualMatch[2]);
+      if (start !== null && end !== null && end > start) {
+        qualsByDay.push({
+          day: currentDay || `Block ${qualsByDay.length + 1}`,
+          start,
+          end,
+          startStr: qualMatch[1].trim(),
+          endStr: qualMatch[2].trim(),
+        });
+      }
+      continue;
+    }
+
+    const breakMatch = divisionBreakRe.exec(line);
+    if (breakMatch) {
+      const breakDivision = normalizeDivisionName(breakMatch[3]);
+      if (breakDivision !== normalizeDivisionName(divisionName)) continue;
+      const start = parseTime12(breakMatch[1]);
+      const end = parseTime12(breakMatch[2]);
+      if (start === null || end === null || end <= start) continue;
+      const key = currentDay || '__unknown__';
+      if (!breaksByDay.has(key)) breaksByDay.set(key, []);
+      breaksByDay.get(key).push({
+        start,
+        end,
+        startStr: breakMatch[1].trim(),
+        endStr: breakMatch[2].trim(),
+      });
+    }
+  }
+
+  for (const qual of qualsByDay) {
+    const breaks = (breaksByDay.get(qual.day) || [])
+      .sort((a, b) => a.start - b.start);
+
+    let segmentStart = qual.start;
+    let segmentStartStr = qual.startStr;
+
+    for (const br of breaks) {
+      const breakStart = Math.max(br.start, qual.start);
+      const breakEnd = Math.min(br.end, qual.end);
+      if (breakEnd <= breakStart) continue;
+
+      if (breakStart > segmentStart) {
+        blocks.push({
+          start: segmentStart,
+          end: breakStart,
+          duration: breakStart - segmentStart,
+          startStr: segmentStartStr,
+          endStr: br.startStr,
+          day: qual.day,
+        });
+      }
+
+      segmentStart = breakEnd;
+      segmentStartStr = br.endStr;
+    }
+
+    if (segmentStart < qual.end) {
+      blocks.push({
+        start: segmentStart,
+        end: qual.end,
+        duration: qual.end - segmentStart,
+        startStr: segmentStartStr,
+        endStr: qual.endStr,
+        day: qual.day,
+      });
+    }
+  }
+
+  return blocks;
+}
+
 /**
  * Parse qual match blocks from normalised agenda text.
  * Returns up to N blocks with start/end times and day label.
@@ -84,9 +208,17 @@ export async function extractPDFText(pdfjsLib, buf) {
  * @param {object} [opts]
  * @param {string} [opts.districtKey] - lowercase TBA district abbreviation (e.g. "nc", "ont")
  *                                      used for diagnostics; parsing is format-detected automatically
+ * @param {number} [opts.eventType]   - TBA event_type (CMP divisions are type 3)
+ * @param {string} [opts.eventName]   - event name, used for CMP division inference
+ * @param {string} [opts.eventKey]    - event key, fallback for CMP division inference
  * @returns {Array<{start,end,duration,startStr,endStr,day}>}
  */
-export function parseQualBlocks(text, { districtKey = '' } = {}) {
+export function parseQualBlocks(text, { districtKey = '', eventType = null, eventName = '', eventKey = '' } = {}) {
+  if (eventType === 3) {
+    const cmpBlocks = parseCmpDivisionQualBlocks(text, { eventName, eventKey });
+    if (cmpBlocks.length > 0) return cmpBlocks;
+  }
+
   const blocks = [];
   const lines = text.replace(/\r/g, '').split('\n');
 

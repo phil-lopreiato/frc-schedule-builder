@@ -244,6 +244,7 @@ details.card > summary::-webkit-details-marker { display: none; }
 import { extractPDFText, parseQualBlocks } from './agenda-parser.mjs';
 import { buildBlockPlans, totalMatchTime } from './schedule-layout.mjs';
 const PDFJS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379';
+const CMP_PUBLIC_SCHEDULE_URL = 'https://www.firstinspires.org/hubfs/web/event/2026/cmp/frc/public-schedule.pdf';
 const TBA_KEY = 'OgkQlossATyHZij8FEAKl0opKiW63fDDSf7Fcwnr9jcJON5XwiGHgmCVZvjFb1Lv';
 
 let state = { teams: 0, blocks: [], eventName: '', isManual: false };
@@ -468,7 +469,13 @@ async function fetchEventInfo(code) {
   return await r.json();
 }
 
-async function fetchAgendaPDF(code) {
+async function fetchAgendaPDF(code, eventInfo = null) {
+  if (eventInfo?.event_type === 3) {
+    const r = await fetch(CMP_PUBLIC_SCHEDULE_URL, { mode: 'cors' });
+    if (!r.ok) throw new Error(`Could not fetch championship division schedule PDF (HTTP ${r.status}).`);
+    return { buf: await r.arrayBuffer(), url: CMP_PUBLIC_SCHEDULE_URL };
+  }
+
   const year = code.substring(0, 4);
   const eventPart = code.substring(4).toUpperCase();
   // Try the direct FIRST URL pattern
@@ -555,14 +562,19 @@ window.loadEvent = async function() {
 
     let blocks = [];
     try {
-      const { buf: pdfBuf, url: pdfUrl } = await fetchAgendaPDF(code);
+      const { buf: pdfBuf, url: pdfUrl } = await fetchAgendaPDF(code, info);
       state.pdfUrl = pdfUrl;
       document.getElementById('agendaLink').href = pdfUrl;
       document.getElementById('agendaLink').classList.remove('hidden');
       setStatus('Parsing PDF...', 'loading');
       const text = await parsePDF(pdfBuf);
       const districtKey = info?.district?.abbreviation?.toLowerCase() ?? '';
-      blocks = parseQualBlocks(text, { districtKey });
+      blocks = parseQualBlocks(text, {
+        districtKey,
+        eventType: info?.event_type,
+        eventName: info?.name,
+        eventKey: code,
+      });
       if (blocks.length === 0) {
         setStatus('PDF loaded but no "Qualification Matches" time blocks found. You can enter blocks manually.', 'error');
       }
