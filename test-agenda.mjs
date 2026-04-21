@@ -34,13 +34,14 @@ async function fetchEvents() {
       e.event_type === 1 ||
       e.event_type === 2 ||
       e.event_type === 3 ||
+      e.event_type === 4 ||
       e.event_type === 5
     )
     .sort((a, b) => a.key.localeCompare(b.key));
 }
 
 async function fetchAgendaPDF(event) {
-  if (event.event_type === 3) {
+  if (event.event_type === 3 || event.event_type === 4) {
     const r = await fetch(CMP_PUBLIC_SCHEDULE_URL);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return new Uint8Array(await r.arrayBuffer());
