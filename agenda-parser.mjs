@@ -148,36 +148,41 @@ function parseCmpDivisionQualBlocks(text, { eventName = '', eventKey = '' } = {}
 
   for (const qual of qualsByDay) {
     const breaks = (breaksByDay.get(qual.day) || [])
-      .filter(b => b.start >= qual.start && b.end <= qual.end)
       .sort((a, b) => a.start - b.start);
-    const divisionBreak = breaks[0];
-    if (!divisionBreak) {
+
+    let segmentStart = qual.start;
+    let segmentStartStr = qual.startStr;
+
+    for (const br of breaks) {
+      const breakStart = Math.max(br.start, qual.start);
+      const breakEnd = Math.min(br.end, qual.end);
+      if (breakEnd <= breakStart) continue;
+
+      if (breakStart > segmentStart) {
+        blocks.push({
+          start: segmentStart,
+          end: breakStart,
+          duration: breakStart - segmentStart,
+          startStr: segmentStartStr,
+          endStr: br.startStr,
+          day: qual.day,
+        });
+      }
+
+      segmentStart = breakEnd;
+      segmentStartStr = br.endStr;
+    }
+
+    if (segmentStart < qual.end) {
       blocks.push({
-        start: qual.start,
+        start: segmentStart,
         end: qual.end,
-        duration: qual.end - qual.start,
-        startStr: qual.startStr,
+        duration: qual.end - segmentStart,
+        startStr: segmentStartStr,
         endStr: qual.endStr,
         day: qual.day,
       });
-      continue;
     }
-    blocks.push({
-      start: qual.start,
-      end: divisionBreak.start,
-      duration: divisionBreak.start - qual.start,
-      startStr: qual.startStr,
-      endStr: divisionBreak.startStr,
-      day: qual.day,
-    });
-    blocks.push({
-      start: divisionBreak.end,
-      end: qual.end,
-      duration: qual.end - divisionBreak.end,
-      startStr: divisionBreak.endStr,
-      endStr: qual.endStr,
-      day: qual.day,
-    });
   }
 
   return blocks;
