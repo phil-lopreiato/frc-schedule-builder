@@ -16,6 +16,7 @@ import * as pdfjsLib from 'pdfjs-dist/build/pdf.mjs';
 const TBA_KEY = 'OgkQlossATyHZij8FEAKl0opKiW63fDDSf7Fcwnr9jcJON5XwiGHgmCVZvjFb1Lv';
 const EXPECTED_STANDARD_BLOCKS = 3;
 const EXPECTED_CMP_DIVISION_BLOCKS = 4;
+const EXPECTED_FRC_CHAMPIONSHIP_BLOCKS = 2;
 const EXPECTED_DCMP_BLOCK_OPTIONS = new Set([3, 4]);
 const CMP_PUBLIC_SCHEDULE_URL = 'https://www.firstinspires.org/hubfs/web/event/2026/cmp/frc/public-schedule.pdf';
 const CONCURRENCY = 6;
@@ -61,8 +62,13 @@ async function testEvent(event) {
   const { key } = event;
   const districtKey = event.district?.abbreviation?.toLowerCase() ?? '';
   const isCmpDivision = event.event_type === 3;
+  const isFrcChampionship = event.event_type === 4;
   const isDcmpOrDivision = event.event_type === 2 || event.event_type === 5;
-  const expectedBlocks = isCmpDivision ? EXPECTED_CMP_DIVISION_BLOCKS : EXPECTED_STANDARD_BLOCKS;
+  const expectedBlocks = isCmpDivision
+    ? EXPECTED_CMP_DIVISION_BLOCKS
+    : isFrcChampionship
+      ? EXPECTED_FRC_CHAMPIONSHIP_BLOCKS
+      : EXPECTED_STANDARD_BLOCKS;
 
   let buf;
   try {
