@@ -469,6 +469,108 @@ async function fetchEventInfo(code) {
   return await r.json();
 }
 
+function fmtMath(n) {
+  return Number.isInteger(n) ? String(n) : n.toFixed(2);
+}
+
+function createEventLinkEl(code) {
+  const a = document.createElement('a');
+  a.href = 'https://www.thebluealliance.com/event/' + encodeURIComponent(code);
+  a.target = '_blank';
+  a.rel = 'noopener';
+  a.style.color = 'var(--accent)';
+  a.textContent = code;
+  return a;
+}
+
+function renderEventDetail({
+  teams,
+  location = '',
+  teamCountMath = '',
+  parentEventKey = '',
+  divisionKeys = [],
+}) {
+  const detailEl = document.getElementById('eventDetail');
+  detailEl.innerHTML = '';
+
+  detailEl.appendChild(document.createTextNode(teams + ' teams'));
+  if (teamCountMath) detailEl.appendChild(document.createTextNode(' (' + teamCountMath + ')'));
+  if (location) detailEl.appendChild(document.createTextNode(' · ' + location));
+
+  const hasParent = !!parentEventKey;
+  const hasDivisions = Array.isArray(divisionKeys) && divisionKeys.length > 0;
+  if (!hasParent && !hasDivisions) return;
+
+  detailEl.appendChild(document.createElement('br'));
+  detailEl.appendChild(document.createTextNode('Links: '));
+
+  let wroteAny = false;
+  if (hasParent) {
+    detailEl.appendChild(document.createTextNode('Parent '));
+    detailEl.appendChild(createEventLinkEl(parentEventKey));
+    wroteAny = true;
+  }
+
+  if (hasDivisions) {
+    if (wroteAny) detailEl.appendChild(document.createTextNode(' · '));
+    detailEl.appendChild(document.createTextNode('Divisions '));
+    divisionKeys.forEach((k, i) => {
+      if (i > 0) detailEl.appendChild(document.createTextNode(', '));
+      detailEl.appendChild(createEventLinkEl(k));
+    });
+  }
+}
+
+async function resolveTeamCountInfo(eventInfo, eventTeamCount, fallbackFromParent = null) {
+  const divisionKeys = Array.isArray(eventInfo?.division_keys) ? eventInfo.division_keys.filter(Boolean) : [];
+  if (divisionKeys.length > 0) {
+    const divisionTeamCounts = await Promise.all(
+      divisionKeys.map(async key => {
+        try {
+          const teams = await fetchTeams(key);
+          return { key, count: teams.length };
+        } catch (_) {
+          return { key, count: 0 };
+        }
+      })
+    );
+    const loadedDivisionCounts = divisionTeamCounts.filter(d => d.count > 0);
+    if (loadedDivisionCounts.length > 0) {
+      const sum = loadedDivisionCounts.reduce((acc, d) => acc + d.count, 0);
+      const avg = sum / loadedDivisionCounts.length;
+      return {
+        count: Math.round(avg),
+        math: loadedDivisionCounts.length === 1
+          ? loadedDivisionCounts[0].count + ' from division ' + loadedDivisionCounts[0].key
+          : sum + ' ÷ ' + loadedDivisionCounts.length + ' loaded divisions = ' + fmtMath(avg) + ' (rounded)',
+        divisionCounts: divisionTeamCounts,
+      };
+    }
+    if (eventTeamCount > 0) {
+      const avg = eventTeamCount / divisionKeys.length;
+      return {
+        count: Math.round(avg),
+        math: eventTeamCount + ' (parent) ÷ ' + divisionKeys.length + ' divisions = ' + fmtMath(avg) + ' (rounded)',
+        divisionCounts: divisionTeamCounts,
+      };
+    }
+  }
+
+  if (eventTeamCount > 0) {
+    return { count: eventTeamCount, math: eventTeamCount + ' from event teams', divisionCounts: [] };
+  }
+
+  if (fallbackFromParent && fallbackFromParent.count > 0) {
+    return {
+      count: fallbackFromParent.count,
+      math: 'fallback to parent-derived count: ' + fallbackFromParent.math,
+      divisionCounts: [],
+    };
+  }
+
+  return { count: 0, math: '', divisionCounts: [] };
+}
+
 async function fetchAgendaPDF(code, eventInfo = null) {
   if (eventInfo?.event_type === 3) {
     const r = await fetch(CMP_PUBLIC_SCHEDULE_URL, { mode: 'cors' });
@@ -544,10 +646,27 @@ window.loadEvent = async function() {
     ]);
     writeEventRoute(code);
 
-    state.teams = teams.length;
+    let parentInfo = null;
+    let parentTeamInfo = null;
+    if (info?.parent_event_key) {
+      parentInfo = await fetchEventInfo(info.parent_event_key);
+      if (parentInfo) {
+        let parentTeams = [];
+        try {
+          parentTeams = await fetchTeams(info.parent_event_key);
+        } catch (_) {
+          parentTeams = [];
+        }
+        parentTeamInfo = await resolveTeamCountInfo(parentInfo, parentTeams.length, null);
+      }
+    }
+
+    const resolvedTeamInfo = await resolveTeamCountInfo(info, teams.length, parentTeamInfo);
+    state.teams = resolvedTeamInfo.count;
     document.getElementById('teamCount').value = state.teams;
     state.eventName = info ? info.name : code;
-    const loc = info ? (info.city + ', ' + info.state_prov) : '';
+    const locParts = info ? [info.city, info.state_prov].filter(Boolean) : [];
+    const loc = locParts.join(', ');
 
     // District events (type 1 = District, 2 = District Championship, 5 = District CMP Division)
     // typically run 12 qual matches per team; regionals run 10.
@@ -555,14 +674,23 @@ window.loadEvent = async function() {
     document.getElementById('matchesPerTeam').value = isDistrict ? 12 : 10;
 
     document.getElementById('eventName').textContent = state.eventName;
-    document.getElementById('eventDetail').textContent =
-      state.teams + ' teams' + (loc ? ' · ' + loc : '');
+    renderEventDetail({
+      teams: state.teams,
+      location: loc,
+      teamCountMath: resolvedTeamInfo.math,
+      parentEventKey: info?.parent_event_key || '',
+      divisionKeys: (Array.isArray(info?.division_keys) && info.division_keys.length > 0)
+        ? info.division_keys
+        : (Array.isArray(parentInfo?.division_keys) ? parentInfo.division_keys : []),
+    });
 
     setStatus('Fetching agenda PDF...', 'loading');
 
     let blocks = [];
     try {
-      const { buf: pdfBuf, url: pdfUrl } = await fetchAgendaPDF(code, info);
+      const agendaCode = info?.parent_event_key || code;
+      const agendaInfo = info?.parent_event_key ? (parentInfo || info) : info;
+      const { buf: pdfBuf, url: pdfUrl } = await fetchAgendaPDF(agendaCode, agendaInfo);
       state.pdfUrl = pdfUrl;
       document.getElementById('agendaLink').href = pdfUrl;
       document.getElementById('agendaLink').classList.remove('hidden');
