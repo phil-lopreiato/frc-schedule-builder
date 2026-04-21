@@ -62,11 +62,11 @@ async function testEvent(event) {
   const { key } = event;
   const districtKey = event.district?.abbreviation?.toLowerCase() ?? '';
   const isCmpDivision = event.event_type === 3;
-  const isFrcChampionship = event.event_type === 4;
+  const isFrcCmp = event.event_type === 4;
   const isDcmpOrDivision = event.event_type === 2 || event.event_type === 5;
   const expectedBlocks = isCmpDivision
     ? EXPECTED_CMP_DIVISION_BLOCKS
-    : isFrcChampionship
+    : isFrcCmp
       ? EXPECTED_FRC_CHAMPIONSHIP_BLOCKS
       : EXPECTED_STANDARD_BLOCKS;
 
