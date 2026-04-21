@@ -16,6 +16,7 @@ import * as pdfjsLib from 'pdfjs-dist/build/pdf.mjs';
 const TBA_KEY = 'OgkQlossATyHZij8FEAKl0opKiW63fDDSf7Fcwnr9jcJON5XwiGHgmCVZvjFb1Lv';
 const EXPECTED_STANDARD_BLOCKS = 3;
 const EXPECTED_CMP_DIVISION_BLOCKS = 4;
+const EXPECTED_DCMP_BLOCK_OPTIONS = new Set([3, 4]);
 const CMP_PUBLIC_SCHEDULE_URL = 'https://www.firstinspires.org/hubfs/web/event/2026/cmp/frc/public-schedule.pdf';
 const CONCURRENCY = 6;
 
@@ -25,9 +26,16 @@ async function fetchEvents() {
   });
   if (!r.ok) throw new Error(`TBA API error: ${r.status}`);
   const events = await r.json();
-  // event_type 0 = Regional, 1 = District, 3 = Championship Division
+  // event_type 0 = Regional, 1 = District, 2 = District Championship,
+  // 3 = Championship Division, 5 = District Championship Division
   return events
-    .filter(e => e.event_type === 0 || e.event_type === 1 || e.event_type === 3)
+    .filter(e =>
+      e.event_type === 0 ||
+      e.event_type === 1 ||
+      e.event_type === 2 ||
+      e.event_type === 3 ||
+      e.event_type === 5
+    )
     .sort((a, b) => a.key.localeCompare(b.key));
 }
 
@@ -51,7 +59,9 @@ async function fetchAgendaPDF(event) {
 async function testEvent(event) {
   const { key } = event;
   const districtKey = event.district?.abbreviation?.toLowerCase() ?? '';
-  const expectedBlocks = event.event_type === 3 ? EXPECTED_CMP_DIVISION_BLOCKS : EXPECTED_STANDARD_BLOCKS;
+  const isCmpDivision = event.event_type === 3;
+  const isDcmpOrDivision = event.event_type === 2 || event.event_type === 5;
+  const expectedBlocks = isCmpDivision ? EXPECTED_CMP_DIVISION_BLOCKS : EXPECTED_STANDARD_BLOCKS;
 
   let buf;
   try {
@@ -74,12 +84,18 @@ async function testEvent(event) {
     return { key, status: 'error', reason: `parse failed: ${e.message}` };
   }
 
+  if (isDcmpOrDivision && EXPECTED_DCMP_BLOCK_OPTIONS.has(blocks.length)) {
+    return { key, status: 'pass', blocks };
+  }
   if (blocks.length === expectedBlocks) {
     return { key, status: 'pass', blocks };
   }
+  const expectedDescription = isDcmpOrDivision
+    ? '3 or 4'
+    : String(expectedBlocks);
   return {
     key, status: 'fail',
-    reason: `expected ${expectedBlocks} blocks, got ${blocks.length}${districtKey ? ` (district: ${districtKey})` : ''}`,
+    reason: `expected ${expectedDescription} blocks, got ${blocks.length}${districtKey ? ` (district: ${districtKey})` : ''}`,
     blocks,
   };
 }
