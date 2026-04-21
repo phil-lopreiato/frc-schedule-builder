@@ -68,6 +68,121 @@ export async function extractPDFText(pdfjsLib, buf) {
   return normalizePDFText(allText);
 }
 
+const CMP_DIVISION_KEY_TO_NAME = {
+  arc: 'Archimedes',
+  cur: 'Curie',
+  dal: 'Daly',
+  gal: 'Galileo',
+  hop: 'Hopper',
+  joh: 'Johnson',
+  mil: 'Milstein',
+  new: 'Newton',
+};
+
+const CMP_DIVISION_NAMES = Object.values(CMP_DIVISION_KEY_TO_NAME);
+
+function normalizeDivisionName(name) {
+  return (name || '').toLowerCase().replace(/[^a-z]/g, '');
+}
+
+function inferCmpDivisionName({ eventName = '', eventKey = '' } = {}) {
+  for (const divisionName of CMP_DIVISION_NAMES) {
+    const re = new RegExp(`\\b${divisionName}\\b`, 'i');
+    if (re.test(eventName)) return divisionName;
+  }
+  const suffix = (eventKey || '').slice(4).toLowerCase();
+  return CMP_DIVISION_KEY_TO_NAME[suffix] || '';
+}
+
+function parseCmpDivisionQualBlocks(text, { eventName = '', eventKey = '' } = {}) {
+  const divisionName = inferCmpDivisionName({ eventName, eventKey });
+  if (!divisionName) return [];
+
+  const blocks = [];
+  const lines = text.replace(/\r/g, '').split('\n');
+  const dayRe = /\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b\s*[,]?\s+(\w+\s+\d{1,2}|\d+\/\d+\/\d+)/i;
+  const qualRe = /(\d{1,2}:\d{2}\s*[AaPp][Mm])\s*[-\u2013\u2014]\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])\s+Qualification\s+Matches/i;
+  const divisionBreakRe = /(\d{1,2}:\d{2}\s*[AaPp][Mm])\s*[-\u2013\u2014]\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])\s+Division\s+Break\s*[-\u2013\u2014]\s*([A-Za-z]+)/i;
+
+  let currentDay = '';
+  const qualsByDay = [];
+  const breaksByDay = new Map();
+
+  for (const line of lines) {
+    const dayMatch = dayRe.exec(line);
+    if (dayMatch) currentDay = dayMatch[1].substring(0, 3) + ' ' + dayMatch[2];
+
+    const qualMatch = qualRe.exec(line);
+    if (qualMatch) {
+      const start = parseTime12(qualMatch[1]);
+      const end = parseTime12(qualMatch[2]);
+      if (start !== null && end !== null && end > start) {
+        qualsByDay.push({
+          day: currentDay || `Block ${qualsByDay.length + 1}`,
+          start,
+          end,
+          startStr: qualMatch[1].trim(),
+          endStr: qualMatch[2].trim(),
+        });
+      }
+      continue;
+    }
+
+    const breakMatch = divisionBreakRe.exec(line);
+    if (breakMatch) {
+      const breakDivision = normalizeDivisionName(breakMatch[3]);
+      if (breakDivision !== normalizeDivisionName(divisionName)) continue;
+      const start = parseTime12(breakMatch[1]);
+      const end = parseTime12(breakMatch[2]);
+      if (start === null || end === null || end <= start) continue;
+      const key = currentDay || '__unknown__';
+      if (!breaksByDay.has(key)) breaksByDay.set(key, []);
+      breaksByDay.get(key).push({
+        start,
+        end,
+        startStr: breakMatch[1].trim(),
+        endStr: breakMatch[2].trim(),
+      });
+    }
+  }
+
+  for (const qual of qualsByDay) {
+    const breaks = (breaksByDay.get(qual.day) || [])
+      .filter(b => b.start > qual.start && b.end < qual.end)
+      .sort((a, b) => a.start - b.start);
+    const divisionBreak = breaks[0];
+    if (!divisionBreak) {
+      blocks.push({
+        start: qual.start,
+        end: qual.end,
+        duration: qual.end - qual.start,
+        startStr: qual.startStr,
+        endStr: qual.endStr,
+        day: qual.day,
+      });
+      continue;
+    }
+    blocks.push({
+      start: qual.start,
+      end: divisionBreak.start,
+      duration: divisionBreak.start - qual.start,
+      startStr: qual.startStr,
+      endStr: divisionBreak.startStr,
+      day: qual.day,
+    });
+    blocks.push({
+      start: divisionBreak.end,
+      end: qual.end,
+      duration: qual.end - divisionBreak.end,
+      startStr: divisionBreak.endStr,
+      endStr: qual.endStr,
+      day: qual.day,
+    });
+  }
+
+  return blocks;
+}
+
 /**
  * Parse qual match blocks from normalised agenda text.
  * Returns up to N blocks with start/end times and day label.
@@ -84,9 +199,17 @@ export async function extractPDFText(pdfjsLib, buf) {
  * @param {object} [opts]
  * @param {string} [opts.districtKey] - lowercase TBA district abbreviation (e.g. "nc", "ont")
  *                                      used for diagnostics; parsing is format-detected automatically
+ * @param {number} [opts.eventType]   - TBA event_type (CMP divisions are type 3)
+ * @param {string} [opts.eventName]   - event name, used for CMP division inference
+ * @param {string} [opts.eventKey]    - event key, fallback for CMP division inference
  * @returns {Array<{start,end,duration,startStr,endStr,day}>}
  */
-export function parseQualBlocks(text, { districtKey = '' } = {}) {
+export function parseQualBlocks(text, { districtKey = '', eventType = null, eventName = '', eventKey = '' } = {}) {
+  if (eventType === 3) {
+    const cmpBlocks = parseCmpDivisionQualBlocks(text, { eventName, eventKey });
+    if (cmpBlocks.length > 0) return cmpBlocks;
+  }
+
   const blocks = [];
   const lines = text.replace(/\r/g, '').split('\n');
 

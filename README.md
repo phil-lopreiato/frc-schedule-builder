@@ -36,7 +36,7 @@ Open `dist/index.html` directly in a browser, or serve with any static file serv
 
 ### Test
 
-Runs the PDF parsing test suite against all 2026 FRC regional and district events via the TBA API. Requires internet access and takes a few minutes.
+Runs the PDF parsing test suite against all 2026 FRC regional, district, and championship division events via the TBA API. Requires internet access and takes a few minutes.
 
 ```
 npm test

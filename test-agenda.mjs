@@ -1,6 +1,6 @@
 /**
- * Test script: fetch all 2026 FRC regional/district events from TBA,
- * attempt to parse each agenda PDF, and assert exactly 3 qual match blocks.
+ * Test script: fetch all 2026 FRC regional/district/CMP division events from TBA,
+ * attempt to parse each agenda PDF, and assert expected qual match block counts.
  *
  * Usage:
  *   npm install
@@ -14,7 +14,9 @@ import { extractPDFText, parseQualBlocks } from './agenda-parser.mjs';
 import * as pdfjsLib from 'pdfjs-dist/build/pdf.mjs';
 
 const TBA_KEY = 'OgkQlossATyHZij8FEAKl0opKiW63fDDSf7Fcwnr9jcJON5XwiGHgmCVZvjFb1Lv';
-const EXPECTED_BLOCKS = 3;
+const EXPECTED_STANDARD_BLOCKS = 3;
+const EXPECTED_CMP_DIVISION_BLOCKS = 4;
+const CMP_PUBLIC_SCHEDULE_URL = 'https://www.firstinspires.org/hubfs/web/event/2026/cmp/frc/public-schedule.pdf';
 const CONCURRENCY = 6;
 
 async function fetchEvents() {
@@ -23,13 +25,20 @@ async function fetchEvents() {
   });
   if (!r.ok) throw new Error(`TBA API error: ${r.status}`);
   const events = await r.json();
-  // event_type 0 = Regional, 1 = District
+  // event_type 0 = Regional, 1 = District, 3 = Championship Division
   return events
-    .filter(e => e.event_type === 0 || e.event_type === 1)
+    .filter(e => e.event_type === 0 || e.event_type === 1 || e.event_type === 3)
     .sort((a, b) => a.key.localeCompare(b.key));
 }
 
-async function fetchAgendaPDF(key) {
+async function fetchAgendaPDF(event) {
+  if (event.event_type === 3) {
+    const r = await fetch(CMP_PUBLIC_SCHEDULE_URL);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return new Uint8Array(await r.arrayBuffer());
+  }
+
+  const key = event.key;
   const year = key.slice(0, 4);
   const eventPart = key.slice(4).toUpperCase();
   const url = `https://info.firstinspires.org/hubfs/web/event/frc/${year}/${year}_${eventPart}_Agenda.pdf`;
@@ -42,10 +51,11 @@ async function fetchAgendaPDF(key) {
 async function testEvent(event) {
   const { key } = event;
   const districtKey = event.district?.abbreviation?.toLowerCase() ?? '';
+  const expectedBlocks = event.event_type === 3 ? EXPECTED_CMP_DIVISION_BLOCKS : EXPECTED_STANDARD_BLOCKS;
 
   let buf;
   try {
-    buf = await fetchAgendaPDF(key);
+    buf = await fetchAgendaPDF(event);
   } catch (e) {
     return { key, status: 'error', reason: `fetch failed: ${e.message}` };
   }
@@ -54,17 +64,22 @@ async function testEvent(event) {
   let blocks;
   try {
     const text = await extractPDFText(pdfjsLib, buf);
-    blocks = parseQualBlocks(text, { districtKey });
+    blocks = parseQualBlocks(text, {
+      districtKey,
+      eventType: event.event_type,
+      eventName: event.name,
+      eventKey: event.key,
+    });
   } catch (e) {
     return { key, status: 'error', reason: `parse failed: ${e.message}` };
   }
 
-  if (blocks.length === EXPECTED_BLOCKS) {
+  if (blocks.length === expectedBlocks) {
     return { key, status: 'pass', blocks };
   }
   return {
     key, status: 'fail',
-    reason: `expected ${EXPECTED_BLOCKS} blocks, got ${blocks.length}${districtKey ? ` (district: ${districtKey})` : ''}`,
+    reason: `expected ${expectedBlocks} blocks, got ${blocks.length}${districtKey ? ` (district: ${districtKey})` : ''}`,
     blocks,
   };
 }
