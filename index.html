@@ -473,10 +473,6 @@ function fmtMath(n) {
   return Number.isInteger(n) ? String(n) : n.toFixed(2);
 }
 
-function roundTeamCount(n) {
-  return Math.floor(n + 0.5);
-}
-
 function createEventLinkEl(code) {
   const a = document.createElement('a');
   a.href = 'https://www.thebluealliance.com/event/' + encodeURIComponent(code);
@@ -543,7 +539,7 @@ async function resolveTeamCountInfo(eventInfo, eventTeamCount, fallbackFromParen
       const sum = loadedDivisionCounts.reduce((acc, d) => acc + d.count, 0);
       const avg = sum / loadedDivisionCounts.length;
       return {
-        count: roundTeamCount(avg),
+        count: Math.round(avg),
         math: loadedDivisionCounts.length === 1
           ? loadedDivisionCounts[0].count + ' from division ' + loadedDivisionCounts[0].key
           : sum + ' ÷ ' + loadedDivisionCounts.length + ' loaded divisions = ' + fmtMath(avg) + ' (rounded)',
@@ -553,7 +549,7 @@ async function resolveTeamCountInfo(eventInfo, eventTeamCount, fallbackFromParen
     if (eventTeamCount > 0) {
       const avg = eventTeamCount / divisionKeys.length;
       return {
-        count: roundTeamCount(avg),
+        count: Math.round(avg),
         math: eventTeamCount + ' (parent) ÷ ' + divisionKeys.length + ' divisions = ' + fmtMath(avg) + ' (rounded)',
         divisionCounts: divisionTeamCounts,
       };
@@ -678,14 +674,16 @@ window.loadEvent = async function() {
     document.getElementById('matchesPerTeam').value = isDistrict ? 12 : 10;
 
     document.getElementById('eventName').textContent = state.eventName;
+    const detailDivisionKeys = (Array.isArray(info?.division_keys) && info.division_keys.length > 0)
+      ? info.division_keys
+      : (Array.isArray(parentInfo?.division_keys) ? parentInfo.division_keys : []);
+
     renderEventDetail({
       teams: state.teams,
       location: loc,
       teamCountMath: resolvedTeamInfo.math,
       parentEventKey: info?.parent_event_key || '',
-      divisionKeys: (Array.isArray(info?.division_keys) && info.division_keys.length > 0)
-        ? info.division_keys
-        : (Array.isArray(parentInfo?.division_keys) ? parentInfo.division_keys : []),
+      divisionKeys: detailDivisionKeys,
     });
 
     setStatus('Fetching agenda PDF...', 'loading');
