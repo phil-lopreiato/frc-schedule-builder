@@ -572,9 +572,9 @@ async function resolveTeamCountInfo(eventInfo, eventTeamCount, fallbackFromParen
 }
 
 async function fetchAgendaPDF(code, eventInfo = null) {
-  if (eventInfo?.event_type === 3) {
+  if (eventInfo?.event_type === 3 || eventInfo?.event_type === 4) {
     const r = await fetch(CMP_PUBLIC_SCHEDULE_URL, { mode: 'cors' });
-    if (!r.ok) throw new Error(`Could not fetch championship division schedule PDF (HTTP ${r.status}).`);
+    if (!r.ok) throw new Error(`Could not fetch championship schedule PDF (HTTP ${r.status}).`);
     return { buf: await r.arrayBuffer(), url: CMP_PUBLIC_SCHEDULE_URL };
   }
 
