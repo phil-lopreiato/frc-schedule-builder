@@ -325,16 +325,18 @@ export function parseQualBlocks(text, { districtKey = '', eventType = null, even
 
     const lunchMatch = openBeginBlock ? lunchRe.exec(line.trim()) : null;
     if (lunchMatch && openBeginBlock) {
+      const priorStart = openBeginBlock.start;
+      const priorDay = openBeginBlock.day;
       const lunchStart = parseTime12(lunchMatch[1]);
       const lunchEnd = parseTime12(lunchMatch[2]);
       if (lunchStart !== null && lunchEnd !== null && lunchEnd > lunchStart) {
-        if (lunchStart > openBeginBlock.start) {
+        if (lunchStart > priorStart) {
           closeOpenBlock(lunchMatch[1].trim(), lunchStart);
         }
         openBeginBlock = {
-          start: Math.max(openBeginBlock?.start ?? lunchEnd, lunchEnd),
+          start: Math.max(priorStart, lunchEnd),
           startStr: lunchMatch[2].trim(),
-          day: currentDay || openBeginBlock?.day || '',
+          day: currentDay || priorDay || '',
         };
       }
       continue;
