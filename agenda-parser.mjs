@@ -148,7 +148,7 @@ function parseCmpDivisionQualBlocks(text, { eventName = '', eventKey = '' } = {}
 
   for (const qual of qualsByDay) {
     const breaks = (breaksByDay.get(qual.day) || [])
-      .filter(b => b.start > qual.start && b.end < qual.end)
+      .filter(b => b.start >= qual.start && b.end <= qual.end)
       .sort((a, b) => a.start - b.start);
     const divisionBreak = breaks[0];
     if (!divisionBreak) {
